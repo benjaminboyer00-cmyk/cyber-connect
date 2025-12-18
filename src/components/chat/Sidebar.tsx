@@ -54,7 +54,7 @@ export function Sidebar({
   };
 
   return (
-    <div className="w-80 h-full bg-sidebar-background border-r border-sidebar-border flex flex-col">
+    <div className="w-80 h-full bg-sidebar border-r border-sidebar-border flex flex-col">
       {/* Header */}
       <div className="p-4 border-b border-sidebar-border">
         <div className="flex items-center justify-between mb-4">
@@ -154,7 +154,7 @@ export function Sidebar({
                         </AvatarFallback>
                       </Avatar>
                       <span 
-                        className={`absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-sidebar-background ${
+                        className={`absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-sidebar ${
                           member?.status === 'online' ? 'bg-green-500' : 'bg-gray-500'
                         }`}
                       />

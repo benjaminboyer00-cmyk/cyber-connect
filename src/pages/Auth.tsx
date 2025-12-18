@@ -33,7 +33,7 @@ export default function Auth() {
         toast.error(error.message);
       } else {
         toast.success('Connexion réussie !');
-        navigate('/');
+        // Navigation handled by useEffect watching user state
       }
     } else {
       if (!username.trim()) {
