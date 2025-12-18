@@ -2,8 +2,10 @@
 import { createClient } from '@supabase/supabase-js';
 import type { Database } from './types';
 
-const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
-const SUPABASE_PUBLISHABLE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+// Lovable preview runs inside an iframe where Navigator LockManager can be unavailable.
+// Also, Lovable does not reliably support VITE_* runtime env vars.
+const SUPABASE_URL = 'https://xjtbbufhlvtvmlkoisxj.supabase.co';
+const SUPABASE_PUBLISHABLE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhqdGJidWZobHZ0dm1sa29pc3hqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjM3MzIzNzgsImV4cCI6MjA3OTMwODM3OH0.aTAUrh7nHj-RB2otFRYiqFAxSoBu-Na8xiSpIdQQiLA';
 
 // Import the supabase client like this:
 // import { supabase } from "@/integrations/supabase/client";
@@ -13,5 +15,7 @@ export const supabase = createClient<Database>(SUPABASE_URL, SUPABASE_PUBLISHABL
     storage: localStorage,
     persistSession: true,
     autoRefreshToken: true,
-  }
+    // Disable navigator locks to avoid: "LockManager.request is not allowed in this context"
+    lock: async (_name, _acquireTimeout, fn) => await fn(),
+  },
 });
