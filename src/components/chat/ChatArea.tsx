@@ -26,14 +26,17 @@ export function ChatArea({ contact, messages, currentUserId, onSendMessage, load
   const [message, setMessage] = useState('');
   const [selectedImage, setSelectedImage] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
-  const scrollRef = useRef<HTMLDivElement>(null);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { uploadFile, uploading } = useFileUpload();
 
+  // Auto-scroll vers le dernier message
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  };
+
   useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
+    scrollToBottom();
   }, [messages]);
 
   const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -166,7 +169,7 @@ export function ChatArea({ contact, messages, currentUserId, onSendMessage, load
       </div>
 
       {/* Messages */}
-      <ScrollArea className="flex-1 p-6 scrollbar-thin" ref={scrollRef}>
+      <ScrollArea className="flex-1 p-6 scrollbar-thin">
         <div className="space-y-4 max-w-3xl mx-auto">
           {loading ? (
             <div className="text-center py-8">
@@ -220,6 +223,8 @@ export function ChatArea({ contact, messages, currentUserId, onSendMessage, load
               );
             })
           )}
+          {/* Anchor for auto-scroll */}
+          <div ref={messagesEndRef} />
         </div>
       </ScrollArea>
 
