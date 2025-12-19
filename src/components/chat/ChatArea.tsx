@@ -1,9 +1,11 @@
 import { useState, useRef, useEffect } from 'react';
-import { Send, Image, Phone, Video, MoreVertical, Users } from 'lucide-react';
+import { Send, Image, Phone, Video, MoreVertical, Users, X, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { useFileUpload } from '@/hooks/useFileUpload';
+import { toast } from 'sonner';
 import type { Tables } from '@/integrations/supabase/types';
 import type { MessageWithSender } from '@/hooks/useMessages';
 
@@ -13,7 +15,7 @@ interface ChatAreaProps {
   contact: Profile | null;
   messages: MessageWithSender[];
   currentUserId: string | undefined;
-  onSendMessage: (content: string) => void;
+  onSendMessage: (content: string, imageUrl?: string) => void;
   loading: boolean;
   isGroup?: boolean;
   groupName?: string;
@@ -22,7 +24,11 @@ interface ChatAreaProps {
 
 export function ChatArea({ contact, messages, currentUserId, onSendMessage, loading, isGroup, groupName, members }: ChatAreaProps) {
   const [message, setMessage] = useState('');
+  const [selectedImage, setSelectedImage] = useState<File | null>(null);
+  const [imagePreview, setImagePreview] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const { uploadFile, uploading } = useFileUpload();
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -30,10 +36,55 @@ export function ChatArea({ contact, messages, currentUserId, onSendMessage, load
     }
   }, [messages]);
 
-  const handleSend = () => {
-    if (!message.trim()) return;
-    onSendMessage(message);
+  const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith('image/')) {
+      toast.error('Veuillez sélectionner une image');
+      return;
+    }
+
+    if (file.size > 10 * 1024 * 1024) {
+      toast.error('L\'image ne doit pas dépasser 10 Mo');
+      return;
+    }
+
+    setSelectedImage(file);
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      setImagePreview(reader.result as string);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const clearImage = () => {
+    setSelectedImage(null);
+    setImagePreview(null);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
+
+  const handleSend = async () => {
+    if (!message.trim() && !selectedImage) return;
+    if (!currentUserId) return;
+
+    let imageUrl: string | undefined;
+
+    if (selectedImage) {
+      const url = await uploadFile(selectedImage, currentUserId);
+      if (url) {
+        imageUrl = url;
+      } else {
+        toast.error('Erreur lors de l\'envoi de l\'image');
+        return;
+      }
+    }
+
+    onSendMessage(message || '', imageUrl);
     setMessage('');
+    clearImage();
   };
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
@@ -48,7 +99,6 @@ export function ChatArea({ contact, messages, currentUserId, onSendMessage, load
     return new Date(dateStr).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
   };
 
-  // Show placeholder only when no conversation is selected at all
   const hasConversation = contact || isGroup;
   
   if (!hasConversation) {
@@ -156,10 +206,11 @@ export function ChatArea({ contact, messages, currentUserId, onSendMessage, load
                         <img 
                           src={msg.image_url} 
                           alt="Image" 
-                          className="max-w-full rounded-lg mb-2"
+                          className="max-w-full rounded-lg mb-2 cursor-pointer hover:opacity-90 transition-opacity"
+                          onClick={() => window.open(msg.image_url!, '_blank')}
                         />
                       )}
-                      <p className="text-sm">{msg.content}</p>
+                      {msg.content && <p className="text-sm">{msg.content}</p>}
                     </div>
                     <p className={`text-xs text-muted-foreground mt-1 ${isOwn ? 'text-right' : ''}`}>
                       {formatTime(msg.created_at)}
@@ -172,10 +223,47 @@ export function ChatArea({ contact, messages, currentUserId, onSendMessage, load
         </div>
       </ScrollArea>
 
+      {/* Image Preview */}
+      {imagePreview && (
+        <div className="px-4 py-2 border-t border-border bg-muted/30">
+          <div className="max-w-3xl mx-auto flex items-center gap-2">
+            <div className="relative">
+              <img 
+                src={imagePreview} 
+                alt="Preview" 
+                className="h-20 w-20 object-cover rounded-lg"
+              />
+              <Button
+                variant="destructive"
+                size="icon"
+                className="absolute -top-2 -right-2 h-6 w-6"
+                onClick={clearImage}
+              >
+                <X className="w-3 h-3" />
+              </Button>
+            </div>
+            <span className="text-sm text-muted-foreground">{selectedImage?.name}</span>
+          </div>
+        </div>
+      )}
+
       {/* Input */}
       <div className="p-4 border-t border-border bg-card/50 backdrop-blur-sm">
         <div className="max-w-3xl mx-auto flex items-center gap-3">
-          <Button variant="ghost" size="icon" className="text-muted-foreground hover:text-foreground shrink-0">
+          <input
+            type="file"
+            ref={fileInputRef}
+            onChange={handleImageSelect}
+            accept="image/*"
+            className="hidden"
+          />
+          <Button 
+            variant="ghost" 
+            size="icon" 
+            className="text-muted-foreground hover:text-foreground shrink-0"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={uploading}
+          >
             <Image className="w-5 h-5" />
           </Button>
           
@@ -185,14 +273,15 @@ export function ChatArea({ contact, messages, currentUserId, onSendMessage, load
             onChange={(e) => setMessage(e.target.value)}
             onKeyPress={handleKeyPress}
             className="flex-1 bg-muted/50 border-border focus:border-primary"
+            disabled={uploading}
           />
           
           <Button 
             onClick={handleSend}
-            disabled={!message.trim()}
+            disabled={(!message.trim() && !selectedImage) || uploading}
             className="bg-gradient-to-r from-primary to-accent hover:opacity-90 text-primary-foreground shrink-0"
           >
-            <Send className="w-5 h-5" />
+            {uploading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5" />}
           </Button>
         </div>
       </div>
