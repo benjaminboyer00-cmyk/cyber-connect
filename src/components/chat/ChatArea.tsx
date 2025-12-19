@@ -4,9 +4,10 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { useFileUpload } from '@/hooks/useFileUpload';
+import { useChunkUpload } from '@/hooks/useChunkUpload';
 import { useVoiceRecorder } from '@/hooks/useVoiceRecorder';
 import { VoiceMessagePlayer } from './VoiceMessagePlayer';
+import { EphemeralImage } from './EphemeralImage';
 import { toast } from 'sonner';
 import type { Tables } from '@/integrations/supabase/types';
 import type { MessageWithSender } from '@/hooks/useMessages';
@@ -30,7 +31,7 @@ export function ChatArea({ contact, messages, currentUserId, onSendMessage, load
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const { uploadFile, uploading } = useFileUpload();
+  const { uploadFileByChunks, uploading, progress } = useChunkUpload();
   const { 
     isRecording, 
     duration, 
@@ -88,26 +89,26 @@ export function ChatArea({ contact, messages, currentUserId, onSendMessage, load
 
     let imageUrl: string | undefined;
 
-    // Upload image si présente
+    // Upload image si présente (via chunks pour passer par le serveur Python)
     if (selectedImage) {
-      const url = await uploadFile(selectedImage, currentUserId);
-      if (url) {
-        imageUrl = url;
+      const result = await uploadFileByChunks(selectedImage, currentUserId);
+      if (result.success && result.fileUrl) {
+        imageUrl = result.fileUrl;
       } else {
-        toast.error('Erreur lors de l\'envoi de l\'image');
+        toast.error(result.error || 'Erreur lors de l\'envoi de l\'image');
         return;
       }
     }
 
-    // Upload audio si présent
+    // Upload audio si présent (via chunks pour passer par le serveur Python)
     if (audioBlob) {
       const audioFile = getAudioFile();
       if (audioFile) {
-        const url = await uploadFile(audioFile, currentUserId);
-        if (url) {
-          imageUrl = url; // On réutilise le champ image_url pour l'audio
+        const result = await uploadFileByChunks(audioFile, currentUserId);
+        if (result.success && result.fileUrl) {
+          imageUrl = result.fileUrl; // On réutilise le champ image_url pour l'audio
         } else {
-          toast.error('Erreur lors de l\'envoi du message vocal');
+          toast.error(result.error || 'Erreur lors de l\'envoi du message vocal');
           return;
         }
       }
@@ -240,12 +241,14 @@ export function ChatArea({ contact, messages, currentUserId, onSendMessage, load
                           if (isAudio) {
                             return <VoiceMessagePlayer src={msg.image_url} isOwn={isOwn} />;
                           }
+                          // Image éphémère avec compte à rebours 60s
                           return (
-                            <img 
-                              src={msg.image_url} 
-                              alt="Image" 
-                              className="max-w-full rounded-lg mb-2 cursor-pointer hover:opacity-90 transition-opacity"
-                              onClick={() => window.open(msg.image_url!, '_blank')}
+                            <EphemeralImage 
+                              src={msg.image_url}
+                              messageId={msg.id}
+                              reporterId={currentUserId || ''}
+                              duration={60}
+                              isOwn={isOwn}
                             />
                           );
                         })()
