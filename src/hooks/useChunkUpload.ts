@@ -4,7 +4,7 @@
  * ═══════════════════════════════════════════════════════════════════════════════
  * 
  * Ce hook découpe les fichiers en chunks et les envoie séquentiellement
- * au serveur Python pour réassemblage.
+ * au serveur Python pour réassemblage via FormData (multipart/form-data).
  * 
  * Cela valide la contrainte "manipulation de flux réseaux" de la SAÉ.
  */
@@ -27,37 +27,18 @@ interface ChunkUploadResult {
 }
 
 /**
- * Génère un identifiant unique pour l'upload
+ * Découpe un fichier binaire en chunks (Blob)
  */
-function generateUploadId(): string {
-  return `upload_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
-}
-
-/**
- * Convertit un fichier en base64
- */
-async function fileToBase64(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const result = reader.result as string;
-      // Enlever le préfixe "data:image/xxx;base64,"
-      const base64 = result.split(',')[1] || result;
-      resolve(base64);
-    };
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
-  });
-}
-
-/**
- * Découpe une chaîne base64 en chunks
- */
-function splitIntoChunks(data: string, chunkSize: number): string[] {
-  const chunks: string[] = [];
-  for (let i = 0; i < data.length; i += chunkSize) {
-    chunks.push(data.slice(i, i + chunkSize));
+function splitFileIntoChunks(file: File, chunkSize: number): Blob[] {
+  const chunks: Blob[] = [];
+  let offset = 0;
+  
+  while (offset < file.size) {
+    const end = Math.min(offset + chunkSize, file.size);
+    chunks.push(file.slice(offset, end));
+    offset = end;
   }
+  
   return chunks;
 }
 
@@ -72,6 +53,7 @@ export function useChunkUpload() {
 
   /**
    * Upload un fichier par chunks vers le serveur Python
+   * Format: FormData avec file, filename, part, total
    */
   const uploadFileByChunks = useCallback(async (
     file: File,
@@ -95,21 +77,16 @@ export function useChunkUpload() {
     });
 
     try {
-      // Convertir en base64
-      console.log('[ChunkUpload] Converting file to base64...');
-      const base64Data = await fileToBase64(file);
-      
-      // Découper en chunks
+      // Découper en chunks binaires (64KB)
       const chunkSize = SERVER_CONFIG.CHUNKS.SIZE;
-      const chunks = splitIntoChunks(base64Data, chunkSize);
+      const chunks = splitFileIntoChunks(file, chunkSize);
       const totalChunks = chunks.length;
-      const uploadId = generateUploadId();
       
-      console.log(`[ChunkUpload] File split into ${totalChunks} chunks`);
+      console.log(`[ChunkUpload] File "${file.name}" split into ${totalChunks} chunks (${chunkSize} bytes each)`);
       
       setState(prev => ({ ...prev, totalChunks }));
       
-      // Envoyer chaque chunk séquentiellement
+      // Envoyer chaque chunk séquentiellement via FormData
       let fileUrl: string | null = null;
       
       for (let i = 0; i < chunks.length; i++) {
@@ -121,22 +98,24 @@ export function useChunkUpload() {
         
         console.log(`[ChunkUpload] Sending chunk ${i + 1}/${totalChunks}...`);
         
+        // Créer le FormData avec les champs requis
+        const formData = new FormData();
+        formData.append('file', chunks[i], file.name);
+        formData.append('filename', file.name);
+        formData.append('part', String(i + 1)); // 1-indexed pour le serveur
+        formData.append('total', String(totalChunks));
+        formData.append('user_id', userId);
+        
         const response = await fetch(getEndpointUrl('UPLOAD_CHUNK'), {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            upload_id: uploadId,
-            chunk_index: i,
-            total_chunks: totalChunks,
-            data: chunks[i],
-            file_name: file.name,
-            user_id: userId,
-          }),
+          body: formData, // FormData = multipart/form-data automatique
           signal: AbortSignal.timeout(SERVER_CONFIG.TIMEOUTS.UPLOAD),
         });
         
         if (!response.ok) {
-          throw new Error(`Chunk ${i + 1} failed: ${response.statusText}`);
+          const errorText = await response.text();
+          console.error(`[ChunkUpload] Chunk ${i + 1} failed:`, errorText);
+          throw new Error(`Chunk ${i + 1} failed: ${response.status} ${response.statusText}`);
         }
         
         const result = await response.json();
