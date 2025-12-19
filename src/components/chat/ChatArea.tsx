@@ -234,12 +234,32 @@ export function ChatArea({ contact, messages, currentUserId, onSendMessage, load
                       }`}
                     >
                       {msg.image_url && (
-                        <img 
-                          src={msg.image_url} 
-                          alt="Image" 
-                          className="max-w-full rounded-lg mb-2 cursor-pointer hover:opacity-90 transition-opacity"
-                          onClick={() => window.open(msg.image_url!, '_blank')}
-                        />
+                        (() => {
+                          const isAudio = msg.image_url.match(/\.(webm|mp3|wav|ogg|m4a|mp4)$/i);
+                          if (isAudio) {
+                            return (
+                              <div className="flex items-center gap-2 min-w-[200px]">
+                                <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${isOwn ? 'bg-primary-foreground/20' : 'bg-primary/20'}`}>
+                                  <Mic className={`w-4 h-4 ${isOwn ? 'text-primary-foreground' : 'text-primary'}`} />
+                                </div>
+                                <audio 
+                                  src={msg.image_url} 
+                                  controls 
+                                  className="h-8 flex-1 max-w-[250px]"
+                                  style={{ filter: isOwn ? 'invert(1) hue-rotate(180deg)' : 'none' }}
+                                />
+                              </div>
+                            );
+                          }
+                          return (
+                            <img 
+                              src={msg.image_url} 
+                              alt="Image" 
+                              className="max-w-full rounded-lg mb-2 cursor-pointer hover:opacity-90 transition-opacity"
+                              onClick={() => window.open(msg.image_url!, '_blank')}
+                            />
+                          );
+                        })()
                       )}
                       {msg.content && <p className="text-sm">{msg.content}</p>}
                     </div>
