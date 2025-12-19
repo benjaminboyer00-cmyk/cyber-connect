@@ -94,6 +94,7 @@ export function useMessages(conversationId: string | null, userId: string | unde
         sender: m.sender_id ? profileMap.get(m.sender_id) || null : null
       }));
 
+      console.log('[fetchMessages] 🔄 Mise à jour du state avec', messagesWithSenders.length, 'messages');
       setMessages(messagesWithSenders);
       setLoading(false);
 
@@ -184,7 +185,7 @@ export function useMessages(conversationId: string | null, userId: string | unde
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [conversationId, userId]);
+  }, [conversationId, userId, fetchMessages]);
 
   /**
    * ═══════════════════════════════════════════════════════════════════════════
@@ -251,7 +252,11 @@ export function useMessages(conversationId: string | null, userId: string | unde
         timestamp: result.timestamp,
       });
 
+      // Petit délai pour laisser le temps à la DB de propager
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
       // Rafraîchir la liste pour récupérer le message déchiffré
+      console.log('[sendMessage] 🔄 Rafraîchissement des messages...');
       await fetchMessages();
 
       return { error: null };
