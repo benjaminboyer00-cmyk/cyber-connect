@@ -31,7 +31,7 @@ export function ChatArea({ contact, messages, currentUserId, onSendMessage, load
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const { uploadFileByChunks, uploading, progress } = useChunkUpload();
+  const { uploadFileByChunks, uploading, progress, reset: resetUpload } = useChunkUpload();
   const { 
     isRecording, 
     duration, 
@@ -78,6 +78,7 @@ export function ChatArea({ contact, messages, currentUserId, onSendMessage, load
   const clearImage = () => {
     setSelectedImage(null);
     setImagePreview(null);
+    resetUpload(); // Reset complet du hook d'upload
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }
@@ -96,6 +97,7 @@ export function ChatArea({ contact, messages, currentUserId, onSendMessage, load
         imageUrl = result.fileUrl;
       } else {
         toast.error(result.error || 'Erreur lors de l\'envoi de l\'image');
+        clearImage(); // Nettoyage complet en cas d'erreur
         return;
       }
     }
@@ -109,6 +111,8 @@ export function ChatArea({ contact, messages, currentUserId, onSendMessage, load
           imageUrl = result.fileUrl;
         } else {
           toast.error(result.error || 'Erreur lors de l\'envoi du message vocal');
+          cancelRecording();
+          resetUpload(); // Nettoyage complet en cas d'erreur
           return;
         }
       }

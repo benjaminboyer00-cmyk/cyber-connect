@@ -112,6 +112,9 @@ export type Database = {
           id: string
           image_url: string | null
           is_read: boolean | null
+          report_reason: string | null
+          reported: boolean | null
+          reporter_id: string | null
           sender_id: string | null
         }
         Insert: {
@@ -121,6 +124,9 @@ export type Database = {
           id?: string
           image_url?: string | null
           is_read?: boolean | null
+          report_reason?: string | null
+          reported?: boolean | null
+          reporter_id?: string | null
           sender_id?: string | null
         }
         Update: {
@@ -130,6 +136,9 @@ export type Database = {
           id?: string
           image_url?: string | null
           is_read?: boolean | null
+          report_reason?: string | null
+          reported?: boolean | null
+          reporter_id?: string | null
           sender_id?: string | null
         }
         Relationships: [
