@@ -63,14 +63,28 @@ export const SERVER_CONFIG = {
 
 /**
  * Vérifie si le serveur Python est accessible
+ * Fallback: si /health échoue, on teste la racine /
  */
 export async function checkServerHealth(): Promise<boolean> {
+  // Essayer /health d'abord
   try {
     const response = await fetch(`${SERVER_CONFIG.BASE_URL}${SERVER_CONFIG.ENDPOINTS.HEALTH}`, {
       method: 'GET',
       signal: AbortSignal.timeout(5000),
     });
-    return response.ok;
+    if (response.ok) return true;
+  } catch {
+    // Continuer avec le fallback
+  }
+  
+  // Fallback: tester la racine /
+  try {
+    const response = await fetch(`${SERVER_CONFIG.BASE_URL}/`, {
+      method: 'GET',
+      signal: AbortSignal.timeout(5000),
+    });
+    // Même une 404 de FastAPI prouve que le serveur répond
+    return response.status < 500;
   } catch {
     return false;
   }

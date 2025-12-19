@@ -155,20 +155,10 @@ export function useMessages(conversationId: string | null, userId: string | unde
       return { error: new Error('Invalid state: missing conversationId or userId') };
     }
 
-    // Vérifier d'abord si le serveur est disponible
+    // Vérification optionnelle - on log mais on ne bloque plus
     const isServerUp = await checkServerHealth();
-    
     if (!isServerUp) {
-      console.error('[sendMessage] ❌ Serveur Python non disponible');
-      console.error('[sendMessage] Architecture Client/Serveur requise - démarrez server.py');
-      
-      return { 
-        error: new Error(
-          'Serveur Python non disponible. ' +
-          'L\'architecture Client/Serveur SAÉ 3.02 requiert que le serveur Python soit actif. ' +
-          'Lancez: python server.py'
-        ) 
-      };
+      console.warn('[sendMessage] ⚠️ Health check échoué, tentative d\'envoi quand même...');
     }
 
     try {
