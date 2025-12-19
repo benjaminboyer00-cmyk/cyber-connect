@@ -89,6 +89,10 @@ export function useChunkUpload() {
       // Envoyer chaque chunk séquentiellement via FormData
       let fileUrl: string | null = null;
       
+      // Générer un nom de fichier unique UNE SEULE FOIS pour tous les chunks
+      const uniqueFilename = `${Date.now()}_${crypto.randomUUID().slice(0, 8)}_${file.name}`;
+      console.log(`[ChunkUpload] Using unique filename: ${uniqueFilename}`);
+      
       for (let i = 0; i < chunks.length; i++) {
         setState(prev => ({
           ...prev,
@@ -97,9 +101,6 @@ export function useChunkUpload() {
         }));
         
         console.log(`[ChunkUpload] Sending chunk ${i + 1}/${totalChunks}...`);
-        
-        // Générer un nom de fichier unique pour éviter les conflits
-        const uniqueFilename = `${Date.now()}_${crypto.randomUUID().slice(0, 8)}_${file.name}`;
         
         // Créer le FormData avec les champs requis
         const formData = new FormData();
