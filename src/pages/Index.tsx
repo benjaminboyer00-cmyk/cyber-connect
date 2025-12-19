@@ -18,7 +18,7 @@ export default function Index() {
   const { user, loading: authLoading, signOut } = useAuth();
   const { profile } = useProfile(user?.id);
   const { friends, pendingRequests, searchUsers, sendFriendRequest, acceptFriendRequest, rejectFriendRequest } = useFriends(user?.id);
-  const { conversations, createConversation, createGroupConversation, refetch: refetchConversations } = useConversations(user?.id);
+  const { conversations, createConversation, createGroupConversation, deleteConversation, refetch: refetchConversations } = useConversations(user?.id);
   
   const [selectedConversation, setSelectedConversation] = useState<string | null>(null);
   const [searchModalOpen, setSearchModalOpen] = useState(false);
@@ -67,6 +67,18 @@ export default function Index() {
     return conversationId;
   };
 
+  const handleDeleteConversation = async (conversationId: string) => {
+    const success = await deleteConversation(conversationId);
+    if (success) {
+      if (selectedConversation === conversationId) {
+        setSelectedConversation(null);
+      }
+      toast.success('Conversation supprimée');
+    } else {
+      toast.error('Erreur lors de la suppression');
+    }
+  };
+
   const handleSendMessage = async (content: string) => {
     const { error } = await sendMessage(content);
     if (error) {
@@ -97,6 +109,7 @@ export default function Index() {
         pendingRequests={pendingRequests}
         selectedConversation={selectedConversation}
         onSelectConversation={setSelectedConversation}
+        onDeleteConversation={handleDeleteConversation}
         onSignOut={handleSignOut}
         onSearchUsers={() => setSearchModalOpen(true)}
         onNewChat={() => setNewChatModalOpen(true)}

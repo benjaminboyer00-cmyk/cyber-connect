@@ -161,5 +161,36 @@ export function useConversations(userId: string | undefined) {
     return data;
   };
 
-  return { conversations, loading, createConversation, createGroupConversation, refetch: fetchConversations };
+  const deleteConversation = async (conversationId: string): Promise<boolean> => {
+    if (!userId) return false;
+
+    // Delete messages first
+    await supabase
+      .from('messages')
+      .delete()
+      .eq('conversation_id', conversationId);
+
+    // Delete membership
+    const { error: memberError } = await supabase
+      .from('conversation_members')
+      .delete()
+      .eq('conversation_id', conversationId)
+      .eq('user_id', userId);
+
+    if (memberError) {
+      console.error('Error leaving conversation:', memberError);
+      return false;
+    }
+
+    // Try to delete the conversation (will work if no other members)
+    await supabase
+      .from('conversations')
+      .delete()
+      .eq('id', conversationId);
+
+    await fetchConversations();
+    return true;
+  };
+
+  return { conversations, loading, createConversation, createGroupConversation, deleteConversation, refetch: fetchConversations };
 }
