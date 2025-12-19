@@ -6,8 +6,7 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { useChunkUpload } from '@/hooks/useChunkUpload';
 import { useVoiceRecorder } from '@/hooks/useVoiceRecorder';
-import { VoiceMessagePlayer } from './VoiceMessagePlayer';
-import { EphemeralImage } from './EphemeralImage';
+import { MessageBubble } from './MessageBubble';
 import { toast } from 'sonner';
 import type { Tables } from '@/integrations/supabase/types';
 import type { MessageWithSender } from '@/hooks/useMessages';
@@ -218,52 +217,13 @@ export function ChatArea({ contact, messages, currentUserId, onSendMessage, load
               const isOwn = msg.sender_id === currentUserId;
               
               return (
-                <div
+                <MessageBubble
                   key={msg.id}
-                  className={`flex items-end gap-2 ${isOwn ? 'flex-row-reverse' : ''}`}
-                >
-                  {!isOwn && (
-                    <Avatar className="w-8 h-8">
-                      <AvatarImage src={msg.sender?.avatar_url || ''} />
-                      <AvatarFallback className="text-xs bg-muted">
-                        {msg.sender?.username?.charAt(0).toUpperCase() || '?'}
-                      </AvatarFallback>
-                    </Avatar>
-                  )}
-                  
-                  <div className={`max-w-[70%] ${isOwn ? 'items-end' : 'items-start'}`}>
-                    <div
-                      className={`px-4 py-2 rounded-2xl ${
-                        isOwn
-                          ? 'bg-gradient-to-r from-primary to-accent text-primary-foreground rounded-br-md'
-                          : 'bg-muted text-foreground rounded-bl-md'
-                      }`}
-                    >
-                      {msg.image_url && (
-                        (() => {
-                          const isAudio = msg.image_url.match(/\.(webm|mp3|wav|ogg|m4a|mp4)$/i);
-                          if (isAudio) {
-                            return <VoiceMessagePlayer src={msg.image_url} isOwn={isOwn} />;
-                          }
-                          // Image éphémère avec compte à rebours 60s
-                          return (
-                            <EphemeralImage 
-                              src={msg.image_url}
-                              messageId={msg.id}
-                              reporterId={currentUserId || ''}
-                              duration={60}
-                              isOwn={isOwn}
-                            />
-                          );
-                        })()
-                      )}
-                      {msg.content && <p className="text-sm">{msg.content}</p>}
-                    </div>
-                    <p className={`text-xs text-muted-foreground mt-1 ${isOwn ? 'text-right' : ''}`}>
-                      {formatTime(msg.created_at)}
-                    </p>
-                  </div>
-                </div>
+                  message={msg}
+                  isOwn={isOwn}
+                  currentUserId={currentUserId || ''}
+                  formatTime={formatTime}
+                />
               );
             })
           )}
