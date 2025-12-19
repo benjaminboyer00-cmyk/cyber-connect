@@ -272,7 +272,7 @@ export function ChatArea({ contact, messages, currentUserId, onSendMessage, load
             value={message}
             onChange={(e) => setMessage(e.target.value)}
             onKeyPress={handleKeyPress}
-            className="flex-1 bg-muted/50 border-border focus:border-primary"
+            className="flex-1 bg-muted/50 border-border focus:border-primary text-foreground placeholder:text-muted-foreground"
             disabled={uploading}
           />
           
