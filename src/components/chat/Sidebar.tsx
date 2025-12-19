@@ -1,10 +1,20 @@
 import { useState } from 'react';
-import { LogOut, Search, UserPlus, MessageSquarePlus, Users } from 'lucide-react';
+import { LogOut, Search, UserPlus, MessageSquarePlus, Users, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import type { Tables } from '@/integrations/supabase/types';
 import type { ConversationWithDetails } from '@/hooks/useConversations';
 import type { FriendWithProfile } from '@/hooks/useFriends';
@@ -17,6 +27,7 @@ interface SidebarProps {
   pendingRequests: FriendWithProfile[];
   selectedConversation: string | null;
   onSelectConversation: (id: string) => void;
+  onDeleteConversation: (id: string) => void;
   onSignOut: () => void;
   onSearchUsers: () => void;
   onNewChat: () => void;
@@ -30,6 +41,7 @@ export function Sidebar({
   pendingRequests,
   selectedConversation,
   onSelectConversation,
+  onDeleteConversation,
   onSignOut,
   onSearchUsers,
   onNewChat,
@@ -37,6 +49,8 @@ export function Sidebar({
   onCreateGroup
 }: SidebarProps) {
   const [searchQuery, setSearchQuery] = useState('');
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [conversationToDelete, setConversationToDelete] = useState<string | null>(null);
 
   const filteredConversations = conversations.filter(conv => {
     const name = conv.is_group ? conv.name : conv.members[0]?.username;
@@ -152,14 +166,14 @@ export function Sidebar({
                   : member?.username?.charAt(0).toUpperCase();
                 
                 return (
-                  <button
+                  <div
                     key={conv.id}
-                    onClick={() => onSelectConversation(conv.id)}
-                    className={`w-full p-3 rounded-lg flex items-center gap-3 transition-all ${
+                    className={`group w-full p-3 rounded-lg flex items-center gap-3 transition-all cursor-pointer ${
                       isSelected 
                         ? 'bg-sidebar-accent border border-primary/30' 
                         : 'hover:bg-sidebar-accent/50'
                     }`}
+                    onClick={() => onSelectConversation(conv.id)}
                   >
                     <div className="relative">
                       <Avatar className="w-12 h-12">
@@ -197,13 +211,52 @@ export function Sidebar({
                         )}
                       </div>
                     </div>
-                  </button>
+
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="opacity-0 group-hover:opacity-100 h-8 w-8 text-muted-foreground hover:text-destructive"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setConversationToDelete(conv.id);
+                        setDeleteDialogOpen(true);
+                      }}
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </Button>
+                  </div>
                 );
               })
             )}
           </div>
         </ScrollArea>
       </div>
+
+      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Supprimer la conversation ?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Cette action est irréversible. Tous les messages seront supprimés.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Annuler</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={() => {
+                if (conversationToDelete) {
+                  onDeleteConversation(conversationToDelete);
+                }
+                setDeleteDialogOpen(false);
+                setConversationToDelete(null);
+              }}
+            >
+              Supprimer
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
