@@ -97,11 +97,11 @@ export function useChunkUpload() {
         setState(prev => ({
           ...prev,
           currentChunk: i + 1,
-          progress: Math.round((i / totalChunks) * 100),
+          progress: Math.round(((i + 1) / totalChunks) * 100),
         }));
-        
+
         console.log(`[ChunkUpload] Sending chunk ${i + 1}/${totalChunks}...`);
-        
+
         // Créer le FormData avec les champs requis
         const formData = new FormData();
         formData.append('file', chunks[i], uniqueFilename);
@@ -109,35 +109,57 @@ export function useChunkUpload() {
         formData.append('part', String(i + 1)); // 1-indexed pour le serveur
         formData.append('total', String(totalChunks));
         formData.append('user_id', userId);
-        
+
         const response = await fetch(getEndpointUrl('UPLOAD_CHUNK'), {
           method: 'POST',
           body: formData, // FormData = multipart/form-data automatique
           signal: AbortSignal.timeout(SERVER_CONFIG.TIMEOUTS.UPLOAD),
         });
-        
+
         if (!response.ok) {
           const errorText = await response.text();
           console.error(`[ChunkUpload] Chunk ${i + 1} failed:`, errorText);
           throw new Error(`Chunk ${i + 1} failed: ${response.status} ${response.statusText}`);
         }
-        
-        const result = await response.json();
-        
-        // Si c'est le dernier chunk, on récupère l'URL
-        if (result.complete && result.file_url) {
-          fileUrl = result.file_url;
+
+        const result: any = await response.json();
+
+        // Supporte plusieurs formats de réponse selon le backend
+        // - { complete: true, file_url: "..." }
+        // - { status: "complete", url: "..." }
+        const maybeUrl: string | null =
+          (typeof result?.file_url === 'string' && result.file_url) ||
+          (typeof result?.url === 'string' && result.url) ||
+          (typeof result?.fileUrl === 'string' && result.fileUrl) ||
+          null;
+
+        const isComplete =
+          result?.complete === true ||
+          result?.status === 'complete' ||
+          result?.status === 'completed';
+
+        if (isComplete) {
+          if (!maybeUrl) {
+            console.error('[ChunkUpload] Upload complete but no URL returned:', result);
+            throw new Error("Upload terminé mais aucune URL n'a été renvoyée par le serveur");
+          }
+
+          fileUrl = maybeUrl;
           console.log('[ChunkUpload] Upload complete:', fileUrl);
         }
       }
-      
+
+      if (!fileUrl) {
+        throw new Error("Upload terminé mais l'URL finale est manquante");
+      }
+
       setState(prev => ({
         ...prev,
         uploading: false,
         progress: 100,
         error: null,
       }));
-      
+
       return {
         success: true,
         fileUrl,
