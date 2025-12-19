@@ -35,6 +35,9 @@ export const SERVER_CONFIG = {
     
     // Signalement de messages
     REPORT: '/api/report',
+    
+    // Traduction de messages
+    TRANSLATE: '/api/translate',
   },
   
   // WebSocket pour heartbeat (navigateurs ne supportent pas UDP natif)
