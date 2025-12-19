@@ -167,18 +167,26 @@ export function useMessages(conversationId: string | null, userId: string | unde
       // ═══════════════════════════════════════════════════════════════════════
       // REQUÊTE HTTP/TCP VERS LE SERVEUR PYTHON (Port 7860)
       // ═══════════════════════════════════════════════════════════════════════
+      
+      // Construire le payload - ne pas inclure image_url si vide (évite erreur 422)
+      const payload: Record<string, unknown> = {
+        conversation_id: conversationId,
+        sender_id: userId,
+        content: content,
+        encrypt: true,
+      };
+      
+      // Ajouter image_url seulement si présent
+      if (imageUrl) {
+        payload.image_url = imageUrl;
+      }
+      
       const response = await fetch(getEndpointUrl('SEND_MESSAGE'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          conversation_id: conversationId,
-          sender_id: userId,
-          content: content,
-          image_url: imageUrl || null,
-          encrypt: true, // Demander le chiffrement Fernet
-        }),
+        body: JSON.stringify(payload),
         signal: AbortSignal.timeout(SERVER_CONFIG.TIMEOUTS.REQUEST),
       });
 
