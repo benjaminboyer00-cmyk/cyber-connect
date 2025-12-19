@@ -1,5 +1,22 @@
+/**
+ * ═══════════════════════════════════════════════════════════════════════════════
+ * Hook de Messages - Architecture Client/Serveur (SAÉ 3.02)
+ * ═══════════════════════════════════════════════════════════════════════════════
+ * 
+ * IMPORTANT: Ce hook a été modifié pour respecter l'architecture Client/Serveur
+ * exigée par la SAÉ 3.02.
+ * 
+ * Flux de données:
+ * - AVANT (Interdit): Client -> Supabase directement
+ * - APRÈS (Obligatoire): Client -> Serveur Python -> Supabase
+ * 
+ * Le serveur Python est le point de passage OBLIGATOIRE pour l'envoi de messages.
+ * La lecture reste via Supabase Realtime pour des raisons de performance.
+ */
+
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
+import { SERVER_CONFIG, getEndpointUrl, checkServerHealth } from '@/config/server';
 import type { Tables } from '@/integrations/supabase/types';
 
 type Message = Tables<'messages'>;
@@ -12,6 +29,12 @@ export interface MessageWithSender extends Message {
 export function useMessages(conversationId: string | null, userId: string | undefined) {
   const [messages, setMessages] = useState<MessageWithSender[]>([]);
   const [loading, setLoading] = useState(true);
+  const [serverAvailable, setServerAvailable] = useState<boolean | null>(null);
+
+  // Vérifier si le serveur Python est disponible au montage
+  useEffect(() => {
+    checkServerHealth().then(setServerAvailable);
+  }, []);
 
   const fetchMessages = useCallback(async () => {
     if (!conversationId) {
@@ -68,7 +91,7 @@ export function useMessages(conversationId: string | null, userId: string | unde
     fetchMessages();
   }, [fetchMessages]);
 
-  // Real-time subscription
+  // Real-time subscription (lecture reste via Supabase pour performance)
   useEffect(() => {
     if (!conversationId) return;
 
@@ -115,20 +138,97 @@ export function useMessages(conversationId: string | null, userId: string | unde
     };
   }, [conversationId, userId]);
 
-  const sendMessage = async (content: string, imageUrl?: string) => {
-    if (!conversationId || !userId) return { error: new Error('Invalid state') };
+  /**
+   * ═══════════════════════════════════════════════════════════════════════════
+   * ENVOI DE MESSAGE - PASSAGE OBLIGATOIRE PAR LE SERVEUR PYTHON
+   * ═══════════════════════════════════════════════════════════════════════════
+   * 
+   * Cette fonction a été modifiée pour respecter l'architecture SAÉ 3.02:
+   * - Le message est envoyé au serveur Python via HTTP/TCP
+   * - Le serveur Python chiffre le message (Fernet/AES-128)
+   * - Le serveur Python insère dans Supabase avec SERVICE_ROLE_KEY
+   * 
+   * SI LE SERVEUR PYTHON EST DOWN, L'ENVOI ÉCHOUE (comportement voulu)
+   */
+  const sendMessage = async (content: string, imageUrl?: string): Promise<{ error: Error | null }> => {
+    if (!conversationId || !userId) {
+      return { error: new Error('Invalid state: missing conversationId or userId') };
+    }
 
-    const { error } = await supabase
-      .from('messages')
-      .insert({
-        conversation_id: conversationId,
-        sender_id: userId,
-        content,
-        image_url: imageUrl || null
+    // Vérifier d'abord si le serveur est disponible
+    const isServerUp = await checkServerHealth();
+    
+    if (!isServerUp) {
+      console.error('[sendMessage] ❌ Serveur Python non disponible');
+      console.error('[sendMessage] Architecture Client/Serveur requise - démarrez server.py');
+      
+      return { 
+        error: new Error(
+          'Serveur Python non disponible. ' +
+          'L\'architecture Client/Serveur SAÉ 3.02 requiert que le serveur Python soit actif. ' +
+          'Lancez: python server.py'
+        ) 
+      };
+    }
+
+    try {
+      console.log('[sendMessage] 📤 Envoi via serveur Python...');
+      
+      // ═══════════════════════════════════════════════════════════════════════
+      // REQUÊTE HTTP/TCP VERS LE SERVEUR PYTHON (Port 7860)
+      // ═══════════════════════════════════════════════════════════════════════
+      const response = await fetch(getEndpointUrl('SEND_MESSAGE'), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          conversation_id: conversationId,
+          sender_id: userId,
+          content: content,
+          image_url: imageUrl || null,
+          encrypt: true, // Demander le chiffrement Fernet
+        }),
+        signal: AbortSignal.timeout(SERVER_CONFIG.TIMEOUTS.REQUEST),
       });
 
-    return { error };
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.detail || `Server error: ${response.status}`);
+      }
+
+      const result = await response.json();
+      
+      console.log('[sendMessage] ✅ Message envoyé via serveur Python:', {
+        messageId: result.message_id,
+        encrypted: result.encrypted,
+        timestamp: result.timestamp,
+      });
+
+      return { error: null };
+
+    } catch (error) {
+      console.error('[sendMessage] ❌ Erreur:', error);
+      
+      // Message d'erreur explicite pour l'architecture Client/Serveur
+      const errorMessage = error instanceof Error 
+        ? error.message 
+        : 'Erreur de communication avec le serveur Python';
+      
+      return { 
+        error: new Error(
+          `Échec de l'envoi via le serveur Python: ${errorMessage}. ` +
+          'Vérifiez que server.py est en cours d\'exécution sur le port 7860.'
+        )
+      };
+    }
   };
 
-  return { messages, loading, sendMessage, refetch: fetchMessages };
+  return { 
+    messages, 
+    loading, 
+    sendMessage, 
+    refetch: fetchMessages,
+    serverAvailable, // Exposer l'état du serveur pour l'UI
+  };
 }
