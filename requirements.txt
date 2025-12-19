@@ -1,0 +1,22 @@
+# ═══════════════════════════════════════════════════════════════════════════════
+# SAÉ 3.02 - Dépendances Python du Serveur
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Framework Web (TCP/HTTP)
+fastapi==0.109.0
+uvicorn[standard]==0.27.0
+
+# Client Supabase
+supabase==2.3.0
+
+# Chiffrement (Fernet/AES-128)
+cryptography==42.0.0
+
+# Variables d'environnement
+python-dotenv==1.0.0
+
+# Validation des données
+pydantic==2.5.3
+
+# HTTP Client (pour Supabase)
+httpx==0.26.0
