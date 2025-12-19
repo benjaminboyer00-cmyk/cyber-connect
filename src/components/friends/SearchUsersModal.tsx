@@ -113,9 +113,8 @@ export function SearchUsersModal({ open, onClose, onSearch, onSendRequest, exist
                     ) : (
                       <Button
                         size="sm"
-                        variant="outline"
                         onClick={() => handleSendRequest(user.id)}
-                        className="gap-1 border-primary text-primary hover:bg-primary hover:text-primary-foreground"
+                        className="gap-1 bg-primary text-primary-foreground hover:bg-primary/90"
                       >
                         <UserPlus className="w-4 h-4" />
                         Ajouter
