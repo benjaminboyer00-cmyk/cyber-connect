@@ -48,7 +48,10 @@ export function ChatArea({ contact, messages, currentUserId, onSendMessage, load
     return new Date(dateStr).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
   };
 
-  if (!contact && !isGroup) {
+  // Show placeholder only when no conversation is selected at all
+  const hasConversation = contact || isGroup;
+  
+  if (!hasConversation) {
     return (
       <div className="flex-1 flex items-center justify-center bg-background">
         <div className="text-center space-y-4">
@@ -62,7 +65,7 @@ export function ChatArea({ contact, messages, currentUserId, onSendMessage, load
     );
   }
 
-  const displayName = isGroup ? groupName : contact?.username;
+  const displayName = isGroup ? groupName : (contact?.username || 'Utilisateur');
   const displayStatus = isGroup 
     ? `${(members?.length || 0) + 1} membres` 
     : (contact?.status === 'online' ? 'En ligne' : 'Hors ligne');

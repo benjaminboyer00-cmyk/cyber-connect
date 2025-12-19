@@ -138,7 +138,7 @@ export function useConversations(userId: string | undefined) {
       return null;
     }
 
-    fetchConversations();
+    await fetchConversations();
     return data;
   };
 
@@ -157,7 +157,7 @@ export function useConversations(userId: string | undefined) {
       return null;
     }
 
-    fetchConversations();
+    await fetchConversations();
     return data;
   };
 
