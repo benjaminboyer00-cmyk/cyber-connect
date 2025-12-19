@@ -2,23 +2,12 @@
  * ═══════════════════════════════════════════════════════════════════════════════
  * Configuration du Serveur Python - SAÉ 3.02
  * ═══════════════════════════════════════════════════════════════════════════════
- * 
- * Ce fichier centralise les URLs et paramètres pour communiquer avec le
+ * * Ce fichier centralise les URLs et paramètres pour communiquer avec le
  * serveur Python (FastAPI + UDP) qui sert de middleware obligatoire.
  */
 
-// Mode de déploiement
-const IS_PRODUCTION = import.meta.env.PROD;
-const IS_HUGGING_FACE = false; // Mettre à true si déployé sur Hugging Face Spaces
-
-/**
- * URL de base du serveur Python
- * - Développement: localhost:7860
- * - Production: Hugging Face Spaces ou autre hébergeur
- */
-export const SERVER_BASE_URL = IS_HUGGING_FACE
-  ? 'https://TON-ESPACE.hf.space'  // Remplacer par ton URL Hugging Face
-  : 'http://localhost:7860';
+// On force l'URL de ton Space Hugging Face pour être sûr que ça marche partout
+export const SERVER_BASE_URL = 'https://benji4565-projet-sae.hf.space';
 
 /**
  * Configuration complète du serveur
