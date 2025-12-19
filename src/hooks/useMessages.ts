@@ -36,6 +36,15 @@ export function useMessages(conversationId: string | null, userId: string | unde
     checkServerHealth().then(setServerAvailable);
   }, []);
 
+  /**
+   * ═══════════════════════════════════════════════════════════════════════════
+   * RÉCUPÉRATION DES MESSAGES VIA LE SERVEUR PYTHON (DÉCHIFFREMENT)
+   * ═══════════════════════════════════════════════════════════════════════════
+   * 
+   * Les messages sont stockés chiffrés dans Supabase.
+   * Le serveur Python les déchiffre avant de les renvoyer au client.
+   * La clé de chiffrement reste côté serveur (sécurité maximale).
+   */
   const fetchMessages = useCallback(async () => {
     if (!conversationId) {
       setMessages([]);
@@ -43,47 +52,94 @@ export function useMessages(conversationId: string | null, userId: string | unde
       return;
     }
 
-    const { data: messagesData, error } = await supabase
-      .from('messages')
-      .select('*')
-      .eq('conversation_id', conversationId)
-      .order('created_at', { ascending: true });
+    try {
+      console.log('[fetchMessages] 📥 Récupération via serveur Python (déchiffrement)...');
+      
+      // Appel à l'endpoint de déchiffrement du serveur Python
+      const response = await fetch(
+        `${SERVER_CONFIG.BASE_URL}/api/get_messages/${conversationId}`,
+        {
+          method: 'GET',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          signal: AbortSignal.timeout(SERVER_CONFIG.TIMEOUTS.REQUEST),
+        }
+      );
 
-    if (error) {
-      console.error('Error fetching messages:', error);
-      setLoading(false);
-      return;
-    }
-
-    // Get sender profiles
-    const senderIds = [...new Set(messagesData?.map(m => m.sender_id).filter(Boolean) as string[])];
-    const { data: profiles } = await supabase
-      .from('profiles')
-      .select('*')
-      .in('id', senderIds);
-
-    const profileMap = new Map(profiles?.map(p => [p.id, p]));
-
-    const messagesWithSenders: MessageWithSender[] = (messagesData || []).map(m => ({
-      ...m,
-      sender: m.sender_id ? profileMap.get(m.sender_id) || null : null
-    }));
-
-    setMessages(messagesWithSenders);
-    setLoading(false);
-
-    // Mark messages as read
-    if (userId && messagesData?.length) {
-      const unreadIds = messagesData
-        .filter(m => !m.is_read && m.sender_id !== userId)
-        .map(m => m.id);
-
-      if (unreadIds.length) {
-        await supabase
-          .from('messages')
-          .update({ is_read: true })
-          .in('id', unreadIds);
+      if (!response.ok) {
+        throw new Error(`Server error: ${response.status}`);
       }
+
+      const data = await response.json();
+      const messagesData: Message[] = data.messages || [];
+
+      console.log('[fetchMessages] ✅ Messages déchiffrés:', messagesData.length);
+
+      // Get sender profiles
+      const senderIds = [...new Set(messagesData?.map(m => m.sender_id).filter(Boolean) as string[])];
+      
+      let profileMap = new Map<string, Profile>();
+      if (senderIds.length > 0) {
+        const { data: profiles } = await supabase
+          .from('profiles')
+          .select('*')
+          .in('id', senderIds);
+        profileMap = new Map(profiles?.map(p => [p.id, p]));
+      }
+
+      const messagesWithSenders: MessageWithSender[] = messagesData.map(m => ({
+        ...m,
+        sender: m.sender_id ? profileMap.get(m.sender_id) || null : null
+      }));
+
+      setMessages(messagesWithSenders);
+      setLoading(false);
+
+      // Mark messages as read
+      if (userId && messagesData?.length) {
+        const unreadIds = messagesData
+          .filter(m => !m.is_read && m.sender_id !== userId)
+          .map(m => m.id);
+
+        if (unreadIds.length) {
+          await supabase
+            .from('messages')
+            .update({ is_read: true })
+            .in('id', unreadIds);
+        }
+      }
+    } catch (error) {
+      console.error('[fetchMessages] ❌ Erreur, fallback Supabase direct:', error);
+      
+      // Fallback: lecture directe depuis Supabase (messages resteront chiffrés)
+      const { data: messagesData, error: supabaseError } = await supabase
+        .from('messages')
+        .select('*')
+        .eq('conversation_id', conversationId)
+        .order('created_at', { ascending: true });
+
+      if (supabaseError) {
+        console.error('Error fetching messages:', supabaseError);
+        setLoading(false);
+        return;
+      }
+
+      const senderIds = [...new Set(messagesData?.map(m => m.sender_id).filter(Boolean) as string[])];
+      const { data: profiles } = await supabase
+        .from('profiles')
+        .select('*')
+        .in('id', senderIds.length > 0 ? senderIds : ['']);
+
+      const profileMap = new Map(profiles?.map(p => [p.id, p]));
+
+      const messagesWithSenders: MessageWithSender[] = (messagesData || []).map(m => ({
+        ...m,
+        sender: m.sender_id ? profileMap.get(m.sender_id) || null : null
+      }));
+
+      setMessages(messagesWithSenders);
+      setLoading(false);
     }
   }, [conversationId, userId]);
 
