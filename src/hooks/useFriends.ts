@@ -63,6 +63,43 @@ export function useFriends(userId: string | undefined) {
     fetchFriends();
   }, [fetchFriends]);
 
+  // Real-time subscription for friend requests
+  useEffect(() => {
+    if (!userId) return;
+
+    const channel = supabase
+      .channel('friends-changes')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'friends',
+          filter: `friend_id=eq.${userId}`
+        },
+        () => {
+          fetchFriends();
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'friends',
+          filter: `user_id=eq.${userId}`
+        },
+        () => {
+          fetchFriends();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [userId, fetchFriends]);
+
   const searchUsers = async (query: string): Promise<Profile[]> => {
     if (!query.trim()) return [];
     
