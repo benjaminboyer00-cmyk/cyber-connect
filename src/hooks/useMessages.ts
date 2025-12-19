@@ -72,7 +72,8 @@ export function useMessages(conversationId: string | null, userId: string | unde
       }
 
       const data = await response.json();
-      const messagesData: Message[] = data.messages || [];
+      // Le serveur renvoie soit { messages: [...] } soit directement [...]
+      const messagesData: Message[] = Array.isArray(data) ? data : (data.messages || []);
 
       console.log('[fetchMessages] ✅ Messages déchiffrés:', messagesData.length);
 
@@ -164,19 +165,10 @@ export function useMessages(conversationId: string | null, userId: string | unde
         async (payload) => {
           const newMessage = payload.new as Message;
           
-          // Get sender profile
-          const { data: sender } = await supabase
-            .from('profiles')
-            .select('*')
-            .eq('id', newMessage.sender_id || '')
-            .maybeSingle();
-
-          const messageWithSender: MessageWithSender = {
-            ...newMessage,
-            sender
-          };
-
-          setMessages(prev => [...prev, messageWithSender]);
+          console.log('[Realtime] 📨 Nouveau message détecté, rafraîchissement...');
+          
+          // Rafraîchir via le serveur Python pour obtenir le message déchiffré
+          await fetchMessages();
 
           // Mark as read if not from current user
           if (userId && newMessage.sender_id !== userId) {
@@ -258,6 +250,9 @@ export function useMessages(conversationId: string | null, userId: string | unde
         encrypted: result.encrypted,
         timestamp: result.timestamp,
       });
+
+      // Rafraîchir la liste pour récupérer le message déchiffré
+      await fetchMessages();
 
       return { error: null };
 
