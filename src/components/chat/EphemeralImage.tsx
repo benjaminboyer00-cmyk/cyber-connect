@@ -21,12 +21,14 @@ export function EphemeralImage({
 }: EphemeralImageProps) {
   const [timeLeft, setTimeLeft] = useState(duration);
   const [isExpired, setIsExpired] = useState(false);
+  const [isLoaded, setIsLoaded] = useState(false); // Timer starts only after image loads
   const [isReporting, setIsReporting] = useState(false);
   const [hasReported, setHasReported] = useState(false);
+  const [loadError, setLoadError] = useState(false);
 
-  // Countdown timer
+  // Countdown timer - starts ONLY after image is loaded
   useEffect(() => {
-    if (isExpired) return;
+    if (isExpired || !isLoaded) return;
 
     const timer = setInterval(() => {
       setTimeLeft(prev => {
@@ -40,7 +42,7 @@ export function EphemeralImage({
     }, 1000);
 
     return () => clearInterval(timer);
-  }, [isExpired]);
+  }, [isExpired, isLoaded]);
 
   // Report image
   const handleReport = useCallback(async () => {
@@ -79,6 +81,16 @@ export function EphemeralImage({
     }
   }, [messageId, reporterId, isReporting, hasReported]);
 
+  // Erreur de chargement
+  if (loadError) {
+    return (
+      <div className="flex items-center gap-2 py-3 px-4 bg-destructive/10 rounded-lg border border-destructive/30">
+        <AlertTriangle className="w-4 h-4 text-destructive" />
+        <span className="text-sm text-destructive italic">Image inaccessible</span>
+      </div>
+    );
+  }
+
   // Image expirée
   if (isExpired) {
     return (
@@ -103,11 +115,19 @@ export function EphemeralImage({
     <div className="relative group">
       {/* Image */}
       <div className="relative overflow-hidden rounded-lg">
+        {/* Loading placeholder */}
+        {!isLoaded && (
+          <div className="w-full h-32 bg-muted/50 animate-pulse rounded-lg flex items-center justify-center">
+            <Clock className="w-6 h-6 text-muted-foreground animate-spin" />
+          </div>
+        )}
         <img 
           src={src} 
           alt="Image éphémère" 
-          className="max-w-full rounded-lg cursor-pointer hover:opacity-95 transition-opacity"
+          className={`max-w-full rounded-lg cursor-pointer hover:opacity-95 transition-opacity ${!isLoaded ? 'hidden' : ''}`}
           onClick={() => window.open(src, '_blank')}
+          onLoad={() => setIsLoaded(true)}
+          onError={() => setLoadError(true)}
         />
         
         {/* Overlay gradient avec timer */}
