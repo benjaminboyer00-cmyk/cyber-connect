@@ -1,10 +1,11 @@
 import { useState, useRef, useEffect } from 'react';
-import { Send, Image, Phone, Video, MoreVertical, Users, X, Loader2 } from 'lucide-react';
+import { Send, Image, Phone, Video, MoreVertical, Users, X, Loader2, Mic, Square, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { useFileUpload } from '@/hooks/useFileUpload';
+import { useVoiceRecorder } from '@/hooks/useVoiceRecorder';
 import { toast } from 'sonner';
 import type { Tables } from '@/integrations/supabase/types';
 import type { MessageWithSender } from '@/hooks/useMessages';
@@ -29,6 +30,17 @@ export function ChatArea({ contact, messages, currentUserId, onSendMessage, load
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { uploadFile, uploading } = useFileUpload();
+  const { 
+    isRecording, 
+    duration, 
+    audioBlob, 
+    audioUrl, 
+    startRecording, 
+    stopRecording, 
+    cancelRecording, 
+    getAudioFile,
+    formatDuration 
+  } = useVoiceRecorder();
 
   // Auto-scroll vers le dernier message
   const scrollToBottom = () => {
@@ -70,11 +82,12 @@ export function ChatArea({ contact, messages, currentUserId, onSendMessage, load
   };
 
   const handleSend = async () => {
-    if (!message.trim() && !selectedImage) return;
+    if (!message.trim() && !selectedImage && !audioBlob) return;
     if (!currentUserId) return;
 
     let imageUrl: string | undefined;
 
+    // Upload image si présente
     if (selectedImage) {
       const url = await uploadFile(selectedImage, currentUserId);
       if (url) {
@@ -85,7 +98,22 @@ export function ChatArea({ contact, messages, currentUserId, onSendMessage, load
       }
     }
 
-    onSendMessage(message || '', imageUrl);
+    // Upload audio si présent
+    if (audioBlob) {
+      const audioFile = getAudioFile();
+      if (audioFile) {
+        const url = await uploadFile(audioFile, currentUserId);
+        if (url) {
+          imageUrl = url; // On réutilise le champ image_url pour l'audio
+        } else {
+          toast.error('Erreur lors de l\'envoi du message vocal');
+          return;
+        }
+      }
+      cancelRecording(); // Reset le recorder
+    }
+
+    onSendMessage(message || (audioBlob ? '🎤 Message vocal' : ''), imageUrl);
     setMessage('');
     clearImage();
   };
@@ -252,6 +280,61 @@ export function ChatArea({ contact, messages, currentUserId, onSendMessage, load
         </div>
       )}
 
+      {/* Audio Preview */}
+      {audioUrl && !isRecording && (
+        <div className="px-4 py-2 border-t border-border bg-muted/30">
+          <div className="max-w-3xl mx-auto flex items-center gap-3">
+            <div className="flex items-center gap-2 flex-1">
+              <div className="w-10 h-10 rounded-full bg-primary/20 flex items-center justify-center">
+                <Mic className="w-5 h-5 text-primary" />
+              </div>
+              <audio src={audioUrl} controls className="h-10 flex-1" />
+            </div>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="text-destructive hover:text-destructive shrink-0"
+              onClick={cancelRecording}
+            >
+              <Trash2 className="w-5 h-5" />
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {/* Recording Indicator */}
+      {isRecording && (
+        <div className="px-4 py-3 border-t border-border bg-destructive/10">
+          <div className="max-w-3xl mx-auto flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-3 h-3 rounded-full bg-destructive animate-pulse" />
+              <span className="text-sm font-medium text-destructive">Enregistrement en cours...</span>
+              <span className="text-sm text-muted-foreground">{formatDuration(duration)}</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={cancelRecording}
+                className="text-muted-foreground hover:text-foreground"
+              >
+                <Trash2 className="w-4 h-4 mr-1" />
+                Annuler
+              </Button>
+              <Button
+                variant="default"
+                size="sm"
+                onClick={stopRecording}
+                className="bg-destructive hover:bg-destructive/90"
+              >
+                <Square className="w-4 h-4 mr-1" />
+                Arrêter
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Input */}
       <div className="p-4 border-t border-border bg-card/50 backdrop-blur-sm">
         <div className="max-w-3xl mx-auto flex items-center gap-3">
@@ -267,9 +350,20 @@ export function ChatArea({ contact, messages, currentUserId, onSendMessage, load
             size="icon" 
             className="text-muted-foreground hover:text-foreground shrink-0"
             onClick={() => fileInputRef.current?.click()}
-            disabled={uploading}
+            disabled={uploading || isRecording}
           >
             <Image className="w-5 h-5" />
+          </Button>
+
+          {/* Bouton Micro */}
+          <Button 
+            variant="ghost" 
+            size="icon" 
+            className={`shrink-0 ${isRecording ? 'text-destructive' : 'text-muted-foreground hover:text-foreground'}`}
+            onClick={isRecording ? stopRecording : startRecording}
+            disabled={uploading}
+          >
+            {isRecording ? <Square className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
           </Button>
           
           <Input
@@ -278,12 +372,12 @@ export function ChatArea({ contact, messages, currentUserId, onSendMessage, load
             onChange={(e) => setMessage(e.target.value)}
             onKeyPress={handleKeyPress}
             className="flex-1 bg-muted/50 border-border focus:border-primary text-foreground placeholder:text-muted-foreground"
-            disabled={uploading}
+            disabled={uploading || isRecording}
           />
           
           <Button 
             onClick={handleSend}
-            disabled={(!message.trim() && !selectedImage) || uploading}
+            disabled={(!message.trim() && !selectedImage && !audioBlob) || uploading || isRecording}
             className="bg-gradient-to-r from-primary to-accent hover:opacity-90 text-primary-foreground shrink-0"
           >
             {uploading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5" />}
