@@ -96,27 +96,27 @@ export function Sidebar({
       {/* Actions */}
       <div className="p-2 flex gap-2 border-b border-sidebar-border">
         <Button 
-          variant="outline" 
+          variant="secondary" 
           size="sm" 
-          className="flex-1 gap-1 border-sidebar-border hover:bg-sidebar-accent text-xs"
+          className="flex-1 gap-1 text-xs"
           onClick={onNewChat}
         >
           <MessageSquarePlus className="w-4 h-4" />
           Chat
         </Button>
         <Button 
-          variant="outline" 
+          variant="secondary" 
           size="sm" 
-          className="flex-1 gap-1 border-sidebar-border hover:bg-sidebar-accent text-xs"
+          className="flex-1 gap-1 text-xs"
           onClick={onCreateGroup}
         >
           <UserPlus className="w-4 h-4" />
           Groupe
         </Button>
         <Button 
-          variant="outline" 
+          variant="secondary" 
           size="sm" 
-          className="relative gap-1 border-sidebar-border hover:bg-sidebar-accent text-xs"
+          className="relative gap-1 text-xs"
           onClick={onViewRequests}
         >
           <Users className="w-4 h-4" />
