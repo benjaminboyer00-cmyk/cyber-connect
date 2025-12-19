@@ -10,6 +10,7 @@ import { ChatArea } from '@/components/chat/ChatArea';
 import { SearchUsersModal } from '@/components/friends/SearchUsersModal';
 import { FriendRequestsModal } from '@/components/friends/FriendRequestsModal';
 import { NewChatModal } from '@/components/friends/NewChatModal';
+import { CreateGroupModal } from '@/components/friends/CreateGroupModal';
 import { toast } from 'sonner';
 
 export default function Index() {
@@ -17,12 +18,13 @@ export default function Index() {
   const { user, loading: authLoading, signOut } = useAuth();
   const { profile } = useProfile(user?.id);
   const { friends, pendingRequests, searchUsers, sendFriendRequest, acceptFriendRequest, rejectFriendRequest } = useFriends(user?.id);
-  const { conversations, createConversation, refetch: refetchConversations } = useConversations(user?.id);
+  const { conversations, createConversation, createGroupConversation, refetch: refetchConversations } = useConversations(user?.id);
   
   const [selectedConversation, setSelectedConversation] = useState<string | null>(null);
   const [searchModalOpen, setSearchModalOpen] = useState(false);
   const [requestsModalOpen, setRequestsModalOpen] = useState(false);
   const [newChatModalOpen, setNewChatModalOpen] = useState(false);
+  const [createGroupModalOpen, setCreateGroupModalOpen] = useState(false);
 
   const { messages, loading: messagesLoading, sendMessage } = useMessages(selectedConversation, user?.id);
 
@@ -55,6 +57,14 @@ export default function Index() {
     if (conversationId) {
       setSelectedConversation(conversationId);
     }
+  };
+
+  const handleCreateGroup = async (memberIds: string[], name: string) => {
+    const conversationId = await createGroupConversation(memberIds, name);
+    if (conversationId) {
+      setSelectedConversation(conversationId);
+    }
+    return conversationId;
   };
 
   const handleSendMessage = async (content: string) => {
@@ -91,6 +101,7 @@ export default function Index() {
         onSearchUsers={() => setSearchModalOpen(true)}
         onNewChat={() => setNewChatModalOpen(true)}
         onViewRequests={() => setRequestsModalOpen(true)}
+        onCreateGroup={() => setCreateGroupModalOpen(true)}
       />
       
       <ChatArea
@@ -99,6 +110,9 @@ export default function Index() {
         currentUserId={user.id}
         onSendMessage={handleSendMessage}
         loading={messagesLoading}
+        isGroup={selectedConv?.is_group || false}
+        groupName={selectedConv?.name || ''}
+        members={selectedConv?.members || []}
       />
 
       <SearchUsersModal
@@ -122,6 +136,13 @@ export default function Index() {
         onClose={() => setNewChatModalOpen(false)}
         friends={friends}
         onSelectFriend={handleNewChat}
+      />
+
+      <CreateGroupModal
+        open={createGroupModalOpen}
+        onClose={() => setCreateGroupModalOpen(false)}
+        friends={friends}
+        onCreateGroup={handleCreateGroup}
       />
     </div>
   );

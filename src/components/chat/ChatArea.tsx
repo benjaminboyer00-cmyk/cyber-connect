@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { Send, Image, Phone, Video, MoreVertical } from 'lucide-react';
+import { Send, Image, Phone, Video, MoreVertical, Users } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -15,9 +15,12 @@ interface ChatAreaProps {
   currentUserId: string | undefined;
   onSendMessage: (content: string) => void;
   loading: boolean;
+  isGroup?: boolean;
+  groupName?: string;
+  members?: Profile[];
 }
 
-export function ChatArea({ contact, messages, currentUserId, onSendMessage, loading }: ChatAreaProps) {
+export function ChatArea({ contact, messages, currentUserId, onSendMessage, loading, isGroup, groupName, members }: ChatAreaProps) {
   const [message, setMessage] = useState('');
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -45,7 +48,7 @@ export function ChatArea({ contact, messages, currentUserId, onSendMessage, load
     return new Date(dateStr).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
   };
 
-  if (!contact) {
+  if (!contact && !isGroup) {
     return (
       <div className="flex-1 flex items-center justify-center bg-background">
         <div className="text-center space-y-4">
@@ -59,23 +62,38 @@ export function ChatArea({ contact, messages, currentUserId, onSendMessage, load
     );
   }
 
+  const displayName = isGroup ? groupName : contact?.username;
+  const displayStatus = isGroup 
+    ? `${(members?.length || 0) + 1} membres` 
+    : (contact?.status === 'online' ? 'En ligne' : 'Hors ligne');
+
   return (
     <div className="flex-1 flex flex-col bg-background">
       {/* Header */}
       <div className="h-16 px-6 border-b border-border flex items-center justify-between bg-card/50 backdrop-blur-sm">
         <div className="flex items-center gap-3">
           <Avatar className="w-10 h-10">
-            <AvatarImage src={contact.avatar_url || ''} />
-            <AvatarFallback className="bg-primary/20 text-primary">
-              {contact.username?.charAt(0).toUpperCase() || '?'}
-            </AvatarFallback>
+            {isGroup ? (
+              <AvatarFallback className="bg-accent/20 text-accent">
+                <Users className="w-5 h-5" />
+              </AvatarFallback>
+            ) : (
+              <>
+                <AvatarImage src={contact?.avatar_url || ''} />
+                <AvatarFallback className="bg-primary/20 text-primary">
+                  {contact?.username?.charAt(0).toUpperCase() || '?'}
+                </AvatarFallback>
+              </>
+            )}
           </Avatar>
           <div>
-            <p className="font-semibold text-foreground">{contact.username}</p>
+            <p className="font-semibold text-foreground">{displayName}</p>
             <div className="flex items-center gap-1">
-              <span className={`w-2 h-2 rounded-full ${contact.status === 'online' ? 'bg-green-500' : 'bg-gray-500'}`} />
+              {!isGroup && (
+                <span className={`w-2 h-2 rounded-full ${contact?.status === 'online' ? 'bg-green-500' : 'bg-gray-500'}`} />
+              )}
               <span className="text-xs text-muted-foreground">
-                {contact.status === 'online' ? 'En ligne' : 'Hors ligne'}
+                {displayStatus}
               </span>
             </div>
           </div>

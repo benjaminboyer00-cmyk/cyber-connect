@@ -126,26 +126,40 @@ export function useConversations(userId: string | undefined) {
       }
     }
 
-    // Create new conversation
-    const { data: newConvo, error: convoError } = await supabase
-      .from('conversations')
-      .insert({ is_group: false })
-      .select()
-      .single();
+    // Create new conversation using database function
+    const { data, error } = await supabase.rpc('create_conversation_with_members', {
+      member_ids: [friendId],
+      conversation_name: null,
+      is_group_chat: false
+    });
 
-    if (convoError || !newConvo) return null;
-
-    // Add both users as members
-    await supabase
-      .from('conversation_members')
-      .insert([
-        { conversation_id: newConvo.id, user_id: userId },
-        { conversation_id: newConvo.id, user_id: friendId }
-      ]);
+    if (error) {
+      console.error('Error creating conversation:', error);
+      return null;
+    }
 
     fetchConversations();
-    return newConvo.id;
+    return data;
   };
 
-  return { conversations, loading, createConversation, refetch: fetchConversations };
+  const createGroupConversation = async (memberIds: string[], name: string): Promise<string | null> => {
+    if (!userId || memberIds.length === 0) return null;
+
+    // Create group conversation using database function
+    const { data, error } = await supabase.rpc('create_conversation_with_members', {
+      member_ids: memberIds,
+      conversation_name: name,
+      is_group_chat: true
+    });
+
+    if (error) {
+      console.error('Error creating group:', error);
+      return null;
+    }
+
+    fetchConversations();
+    return data;
+  };
+
+  return { conversations, loading, createConversation, createGroupConversation, refetch: fetchConversations };
 }

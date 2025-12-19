@@ -21,6 +21,7 @@ interface SidebarProps {
   onSearchUsers: () => void;
   onNewChat: () => void;
   onViewRequests: () => void;
+  onCreateGroup: () => void;
 }
 
 export function Sidebar({
@@ -32,13 +33,14 @@ export function Sidebar({
   onSignOut,
   onSearchUsers,
   onNewChat,
-  onViewRequests
+  onViewRequests,
+  onCreateGroup
 }: SidebarProps) {
   const [searchQuery, setSearchQuery] = useState('');
 
   const filteredConversations = conversations.filter(conv => {
-    const name = conv.members[0]?.username || 'Conversation';
-    return name.toLowerCase().includes(searchQuery.toLowerCase());
+    const name = conv.is_group ? conv.name : conv.members[0]?.username;
+    return (name || 'Conversation').toLowerCase().includes(searchQuery.toLowerCase());
   });
 
   const formatTime = (dateStr: string | null) => {
@@ -96,20 +98,28 @@ export function Sidebar({
         <Button 
           variant="outline" 
           size="sm" 
-          className="flex-1 gap-2 border-sidebar-border hover:bg-sidebar-accent"
+          className="flex-1 gap-1 border-sidebar-border hover:bg-sidebar-accent text-xs"
           onClick={onNewChat}
         >
           <MessageSquarePlus className="w-4 h-4" />
-          Nouveau chat
+          Chat
         </Button>
         <Button 
           variant="outline" 
           size="sm" 
-          className="relative gap-2 border-sidebar-border hover:bg-sidebar-accent"
+          className="flex-1 gap-1 border-sidebar-border hover:bg-sidebar-accent text-xs"
+          onClick={onCreateGroup}
+        >
+          <UserPlus className="w-4 h-4" />
+          Groupe
+        </Button>
+        <Button 
+          variant="outline" 
+          size="sm" 
+          className="relative gap-1 border-sidebar-border hover:bg-sidebar-accent text-xs"
           onClick={onViewRequests}
         >
           <Users className="w-4 h-4" />
-          Demandes
           {pendingRequests.length > 0 && (
             <Badge variant="destructive" className="absolute -top-2 -right-2 w-5 h-5 p-0 flex items-center justify-center text-xs">
               {pendingRequests.length}
@@ -135,6 +145,11 @@ export function Sidebar({
               filteredConversations.map((conv) => {
                 const member = conv.members[0];
                 const isSelected = selectedConversation === conv.id;
+                const displayName = conv.is_group ? conv.name : member?.username;
+                const displayAvatar = conv.is_group ? null : member?.avatar_url;
+                const displayInitial = conv.is_group 
+                  ? conv.name?.charAt(0).toUpperCase() 
+                  : member?.username?.charAt(0).toUpperCase();
                 
                 return (
                   <button
@@ -148,22 +163,24 @@ export function Sidebar({
                   >
                     <div className="relative">
                       <Avatar className="w-12 h-12">
-                        <AvatarImage src={member?.avatar_url || ''} />
-                        <AvatarFallback className="bg-muted text-muted-foreground">
-                          {member?.username?.charAt(0).toUpperCase() || '?'}
+                        <AvatarImage src={displayAvatar || ''} />
+                        <AvatarFallback className={conv.is_group ? 'bg-accent/20 text-accent' : 'bg-muted text-muted-foreground'}>
+                          {conv.is_group ? <Users className="w-5 h-5" /> : displayInitial || '?'}
                         </AvatarFallback>
                       </Avatar>
-                      <span 
-                        className={`absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-sidebar ${
-                          member?.status === 'online' ? 'bg-green-500' : 'bg-gray-500'
-                        }`}
-                      />
+                      {!conv.is_group && (
+                        <span 
+                          className={`absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-sidebar ${
+                            member?.status === 'online' ? 'bg-green-500' : 'bg-gray-500'
+                          }`}
+                        />
+                      )}
                     </div>
                     
                     <div className="flex-1 min-w-0 text-left">
                       <div className="flex items-center justify-between">
                         <p className="font-medium text-sidebar-foreground truncate">
-                          {member?.username || 'Utilisateur'}
+                          {displayName || 'Utilisateur'}
                         </p>
                         <span className="text-xs text-muted-foreground">
                           {formatTime(conv.lastMessage?.created_at || null)}
