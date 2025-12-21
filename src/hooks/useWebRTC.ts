@@ -1,3 +1,13 @@
+/**
+ * Hook WebRTC pour les appels audio/vidéo
+ * 
+ * CORRECTIFS APPLIQUÉS:
+ * - cleanupLocalResources() séparé de endCall() pour éviter la dépendance circulaire
+ * - endCall() envoie le signal SEULEMENT sur action utilisateur
+ * - createPeerConnection n'appelle plus endCall() directement
+ * - File d'attente ICE rigoureuse (addIceCandidate SEULEMENT après remoteDescription)
+ */
+
 import { useState, useEffect, useRef, useCallback } from 'react';
 
 export type CallState = 'idle' | 'calling' | 'ringing' | 'connected' | 'failed';
@@ -35,7 +45,7 @@ export const useWebRTC = (
     callerId: string | null;
   }>({ targetId: null, callerId: null });
 
-  // Timeout pour ICE disconnected (évite les faux positifs)
+  // Timeout pour ICE disconnected
   const disconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // 1. Accès caméra/micro
@@ -57,46 +67,64 @@ export const useWebRTC = (
     }
   }, []);
 
-  // 2. Fin d'appel (avec protection contre appels multiples)
-  const endCall = useCallback(() => {
-    // Éviter les appels multiples si déjà idle
-    if (callState === 'idle') {
-      console.log('⚠️ Déjà en idle, ignore endCall');
-      return;
-    }
+  /**
+   * NOUVEAU: Nettoyage des ressources locales SANS envoyer de signal
+   * Cette fonction est stable (pas de dépendances variables)
+   */
+  const cleanupLocalResources = useCallback(() => {
+    console.log('🧹 Nettoyage ressources locales...');
 
-    console.log('🛑 Fin d\'appel');
-
-    // Annuler le timeout de déconnexion si actif
+    // Annuler le timeout de déconnexion
     if (disconnectTimeoutRef.current) {
       clearTimeout(disconnectTimeoutRef.current);
       disconnectTimeoutRef.current = null;
     }
 
-    if (currentCallRef.current.targetId && signaling) {
-      signaling.sendSignal(currentCallRef.current.targetId, 'call-ended');
-    }
-
+    // Fermer la connexion peer
     if (peerConnectionRef.current) {
       peerConnectionRef.current.close();
       peerConnectionRef.current = null;
     }
 
+    // Arrêter les tracks média
     if (localStreamRef.current) {
       localStreamRef.current.getTracks().forEach(track => track.stop());
       localStreamRef.current = null;
     }
 
+    // Reset state
     setLocalStream(null);
     setRemoteStream(null);
     setCallState('idle');
     setIsCaller(false);
+    
+    // Reset refs
     currentCallRef.current = { targetId: null, callerId: null };
     isRemoteDescriptionSet.current = false;
     pendingCandidatesQueue.current = [];
-  }, [signaling, callState]);
+  }, []); // PAS de dépendances = fonction stable
 
-  // 3. Création PeerConnection
+  /**
+   * Fin d'appel par action utilisateur - ENVOIE le signal call-ended
+   */
+  const endCall = useCallback(() => {
+    console.log('🛑 Fin d\'appel (action utilisateur)');
+
+    // Envoyer le signal de fin AVANT de nettoyer
+    if (currentCallRef.current.targetId && signaling) {
+      signaling.sendSignal(currentCallRef.current.targetId, 'call-ended');
+    } else if (currentCallRef.current.callerId && signaling) {
+      signaling.sendSignal(currentCallRef.current.callerId, 'call-ended');
+    }
+
+    // Nettoyer les ressources
+    cleanupLocalResources();
+  }, [signaling, cleanupLocalResources]);
+
+  /**
+   * Création PeerConnection
+   * N'utilise plus endCall() - utilise cleanupLocalResources() pour les échecs
+   */
   const createPeerConnection = useCallback((targetId: string) => {
     console.log('🔧 Création PeerConnection vers', targetId);
     
@@ -134,26 +162,25 @@ export const useWebRTC = (
       if (['connected', 'completed'].includes(pc.iceConnectionState)) {
         setCallState('connected');
       } else if (pc.iceConnectionState === 'disconnected') {
-        // 'disconnected' est souvent transitoire - attendre 3s avant de couper
-        console.log('⏳ ICE disconnected - attente 3s avant timeout...');
+        // 'disconnected' est souvent transitoire - attendre 5s avant de couper
+        console.log('⏳ ICE disconnected - attente 5s avant timeout...');
         disconnectTimeoutRef.current = setTimeout(() => {
           if (peerConnectionRef.current?.iceConnectionState === 'disconnected') {
-            console.log('⏰ Timeout ICE - fin d\'appel');
-            endCall();
+            console.log('⏰ Timeout ICE - nettoyage local (pas de signal)');
+            cleanupLocalResources(); // PAS endCall() - pas d'action utilisateur
           }
-        }, 3000);
+        }, 5000);
       } else if (pc.iceConnectionState === 'failed') {
-        // 'failed' est fatal - fin immédiate
-        console.log('❌ ICE failed - fin d\'appel');
-        endCall();
+        // 'failed' est fatal - nettoyage sans signal (ce n'est pas une action utilisateur)
+        console.log('❌ ICE failed - nettoyage local');
+        cleanupLocalResources();
       }
-      // 'closed' n'appelle plus endCall() car c'est nous qui fermons
     };
 
     return pc;
-  }, [signaling, endCall]);
+  }, [signaling, cleanupLocalResources]); // PAS endCall dans les dépendances!
 
-  // 4. Vidage file d'attente ICE
+  // Vidage file d'attente ICE
   const processPendingCandidates = useCallback(async () => {
     if (!peerConnectionRef.current) return;
 
@@ -172,7 +199,7 @@ export const useWebRTC = (
     }
   }, []);
 
-  // 5. Gestionnaire signaux WebSocket
+  // Gestionnaire signaux WebSocket
   useEffect(() => {
     if (!signaling) return;
 
@@ -184,7 +211,8 @@ export const useWebRTC = (
 
       switch (type) {
         case 'offer':
-          if (callState !== 'idle') {
+          // Ignorer si déjà en appel
+          if (callState !== 'idle' && callState !== 'ringing') {
             console.log('⚠️ Déjà en appel, ignore offre');
             return;
           }
@@ -215,7 +243,7 @@ export const useWebRTC = (
 
           } catch (error) {
             console.error('❌ Erreur traitement offre:', error);
-            endCall();
+            cleanupLocalResources();
           }
           break;
 
@@ -232,18 +260,19 @@ export const useWebRTC = (
             console.log('✅ Réponse traitée');
           } catch (error) {
             console.error('❌ Erreur réponse:', error);
-            endCall();
+            cleanupLocalResources();
           }
           break;
 
         case 'ice-candidate':
           try {
+            // CRITIQUE: Ne faire addIceCandidate QUE si remoteDescription est set
             if (isRemoteDescriptionSet.current && peerConnectionRef.current) {
               await peerConnectionRef.current.addIceCandidate(new RTCIceCandidate(payload));
               console.log('✅ ICE ajouté immédiatement');
             } else {
               pendingCandidatesQueue.current.push(payload);
-              console.log('📦 ICE mis en file');
+              console.log('📦 ICE mis en file (remoteDesc pas encore set)');
             }
           } catch (error) {
             console.error('❌ Erreur ICE:', error);
@@ -251,21 +280,21 @@ export const useWebRTC = (
           break;
 
         case 'call-rejected':
-          console.log('📞 Appel rejeté');
-          endCall();
+          console.log('📞 Appel rejeté par distant');
+          cleanupLocalResources();
           break;
 
         case 'call-ended':
           console.log('📞 Appel terminé par distant');
-          endCall();
+          cleanupLocalResources();
           break;
       }
     };
 
     signaling.onMessage(handleSignalMessage);
-  }, [signaling, callState, initializeLocalStream, createPeerConnection, processPendingCandidates, endCall]);
+  }, [signaling, callState, initializeLocalStream, createPeerConnection, processPendingCandidates, cleanupLocalResources]);
 
-  // --- ACTIONS ---
+  // Appeler un utilisateur
   const callUser = useCallback(async (targetId: string) => {
     if (callState !== 'idle' || !currentUserId || !signaling) {
       console.log('⚠️ Impossible d\'appeler');
@@ -299,10 +328,11 @@ export const useWebRTC = (
 
     } catch (error) {
       console.error('❌ Erreur appel:', error);
-      endCall();
+      cleanupLocalResources();
     }
-  }, [callState, currentUserId, signaling, initializeLocalStream, createPeerConnection, endCall]);
+  }, [callState, currentUserId, signaling, initializeLocalStream, createPeerConnection, cleanupLocalResources]);
 
+  // Accepter un appel
   const acceptCall = useCallback(async () => {
     if (callState !== 'ringing' || !peerConnectionRef.current || !currentCallRef.current.callerId) {
       console.log('⚠️ Aucun appel à accepter');
@@ -319,36 +349,24 @@ export const useWebRTC = (
       setCallState('connected');
     } catch (error) {
       console.error('❌ Erreur acceptation:', error);
-      endCall();
+      cleanupLocalResources();
     }
-  }, [callState, signaling, endCall]);
+  }, [callState, signaling, cleanupLocalResources]);
 
+  // Rejeter un appel
   const rejectCall = useCallback(() => {
     if (callState === 'ringing' && currentCallRef.current.callerId && signaling) {
       signaling.sendSignal(currentCallRef.current.callerId, 'call-rejected');
     }
-    endCall();
-  }, [callState, signaling, endCall]);
+    cleanupLocalResources();
+  }, [callState, signaling, cleanupLocalResources]);
 
-  // Cleanup - SEULEMENT ressources locales, PAS de signaling
+  // Cleanup au démontage - SEULEMENT ressources locales, PAS de signaling
   useEffect(() => {
     return () => {
-      // Annuler le timeout
-      if (disconnectTimeoutRef.current) {
-        clearTimeout(disconnectTimeoutRef.current);
-      }
-      // Fermer la connexion sans envoyer de signal
-      if (peerConnectionRef.current) {
-        peerConnectionRef.current.close();
-        peerConnectionRef.current = null;
-      }
-      // Arrêter les tracks média
-      if (localStreamRef.current) {
-        localStreamRef.current.getTracks().forEach(track => track.stop());
-        localStreamRef.current = null;
-      }
+      cleanupLocalResources();
     };
-  }, []);
+  }, [cleanupLocalResources]);
 
   return {
     localStream,

@@ -3,15 +3,10 @@
  * Hook de Messages - Architecture Client/Serveur (SAÉ 3.02)
  * ═══════════════════════════════════════════════════════════════════════════════
  * 
- * IMPORTANT: Ce hook a été modifié pour respecter l'architecture Client/Serveur
- * exigée par la SAÉ 3.02.
- * 
- * Flux de données:
- * - AVANT (Interdit): Client -> Supabase directement
- * - APRÈS (Obligatoire): Client -> Serveur Python -> Supabase
- * 
- * Le serveur Python est le point de passage OBLIGATOIRE pour l'envoi de messages.
- * La lecture reste via Supabase Realtime pour des raisons de performance.
+ * CORRECTIFS APPLIQUÉS:
+ * - Déchiffrement ciblé via /api/decrypt_message pour les nouveaux messages
+ * - Plus de fetchMessages() complet dans le handler Realtime
+ * - Protection anti-unmount avec isMountedRef
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react';
@@ -27,12 +22,11 @@ export interface MessageWithSender extends Message {
 }
 
 export function useMessages(conversationId: string | null, userId: string | undefined) {
-  // Tous les useState doivent être appelés dans le même ordre à chaque render
   const [messages, setMessages] = useState<MessageWithSender[]>([]);
   const [loading, setLoading] = useState(true);
   const [serverAvailable, setServerAvailable] = useState<boolean | null>(null);
   
-  // Refs pour éviter les boucles infinies (refs sont stables entre les renders)
+  // Refs pour éviter les boucles infinies
   const conversationIdRef = useRef<string | null>(conversationId);
   const userIdRef = useRef<string | undefined>(userId);
   const isFetchingRef = useRef<boolean>(false);
@@ -45,7 +39,7 @@ export function useMessages(conversationId: string | null, userId: string | unde
     userIdRef.current = userId;
   }, [conversationId, userId]);
   
-  // Track mount state pour éviter les updates après unmount
+  // Track mount state
   useEffect(() => {
     isMountedRef.current = true;
     return () => {
@@ -53,7 +47,7 @@ export function useMessages(conversationId: string | null, userId: string | unde
     };
   }, []);
 
-  // Vérifier si le serveur Python est disponible au montage
+  // Vérifier si le serveur Python est disponible
   useEffect(() => {
     let cancelled = false;
     checkServerHealth().then((result) => {
@@ -64,27 +58,70 @@ export function useMessages(conversationId: string | null, userId: string | unde
     return () => { cancelled = true; };
   }, []);
 
+  // Helper pour set state seulement si monté
+  const safeSetState = useCallback(<T,>(setter: React.Dispatch<React.SetStateAction<T>>, value: T | ((prev: T) => T)) => {
+    if (isMountedRef.current) {
+      setter(value);
+    }
+  }, []);
+
   /**
-   * ═══════════════════════════════════════════════════════════════════════════
-   * RÉCUPÉRATION DES MESSAGES VIA LE SERVEUR PYTHON (DÉCHIFFREMENT)
-   * ═══════════════════════════════════════════════════════════════════════════
-   * 
-   * Les messages sont stockés chiffrés dans Supabase.
-   * Le serveur Python les déchiffre avant de les renvoyer au client.
-   * La clé de chiffrement reste côté serveur (sécurité maximale).
+   * Récupérer le profil d'un utilisateur
    */
-  // fetchMessages avec debounce et protection contre appels concurrents
+  const getProfile = useCallback(async (profileId: string): Promise<Profile | null> => {
+    try {
+      const { data } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', profileId)
+        .single();
+      return data;
+    } catch {
+      return null;
+    }
+  }, []);
+
+  /**
+   * Déchiffrer un seul message via le serveur Python
+   */
+  const decryptSingleMessage = useCallback(async (encryptedContent: string): Promise<string> => {
+    try {
+      const response = await fetch(
+        `${SERVER_CONFIG.BASE_URL}/api/decrypt_message`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ content: encryptedContent }),
+          signal: AbortSignal.timeout(5000),
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error(`Server error: ${response.status}`);
+      }
+
+      const data = await response.json();
+      return data.decrypted || encryptedContent;
+    } catch (error) {
+      console.error('[decryptSingleMessage] ❌ Erreur:', error);
+      return encryptedContent; // Retourner le contenu original en cas d'échec
+    }
+  }, []);
+
+  /**
+   * Récupération des messages via le serveur Python
+   */
   const fetchMessages = useCallback(async () => {
     const convId = conversationIdRef.current;
     const uid = userIdRef.current;
     
     if (!convId) {
-      setMessages([]);
-      setLoading(false);
+      safeSetState(setMessages, []);
+      safeSetState(setLoading, false);
       return;
     }
 
-    // Protection: éviter les appels concurrents et debounce de 500ms
+    // Protection: debounce et anti-concurrent
     const now = Date.now();
     if (isFetchingRef.current || (now - lastFetchTimeRef.current < 500)) {
       console.log('[fetchMessages] ⏳ Appel ignoré (debounce ou fetch en cours)');
@@ -93,25 +130,15 @@ export function useMessages(conversationId: string | null, userId: string | unde
     
     isFetchingRef.current = true;
     lastFetchTimeRef.current = now;
-    
-    // Helper pour set state seulement si monté
-    const safeSetState = <T,>(setter: React.Dispatch<React.SetStateAction<T>>, value: T) => {
-      if (isMountedRef.current) {
-        setter(value);
-      }
-    };
 
     try {
-      console.log('[fetchMessages] 📥 Récupération via serveur Python (déchiffrement)...');
+      console.log('[fetchMessages] 📥 Récupération via serveur Python...');
       
-      // Appel à l'endpoint de déchiffrement du serveur Python
       const response = await fetch(
         `${SERVER_CONFIG.BASE_URL}/api/get_messages/${convId}`,
         {
           method: 'GET',
-          headers: {
-            'Content-Type': 'application/json',
-          },
+          headers: { 'Content-Type': 'application/json' },
           signal: AbortSignal.timeout(SERVER_CONFIG.TIMEOUTS.REQUEST),
         }
       );
@@ -121,7 +148,6 @@ export function useMessages(conversationId: string | null, userId: string | unde
       }
 
       const data = await response.json();
-      // Le serveur renvoie soit { messages: [...] } soit directement [...]
       const messagesData: Message[] = Array.isArray(data) ? data : (data.messages || []);
 
       console.log('[fetchMessages] ✅ Messages déchiffrés:', messagesData.length);
@@ -143,7 +169,6 @@ export function useMessages(conversationId: string | null, userId: string | unde
         sender: m.sender_id ? profileMap.get(m.sender_id) || null : null
       }));
 
-      // Déduplication par id (évite les ré-affichages si le serveur renvoie des doublons)
       const uniqueMessages = Array.from(new Map(messagesWithSenders.map(m => [m.id, m])).values());
 
       console.log('[fetchMessages] 🔄 Mise à jour du state avec', uniqueMessages.length, 'messages');
@@ -170,6 +195,9 @@ export function useMessages(conversationId: string | null, userId: string | unde
       console.error('[fetchMessages] ❌ Erreur, fallback Supabase direct:', error);
       
       // Fallback: lecture directe depuis Supabase (messages resteront chiffrés)
+      const convId = conversationIdRef.current;
+      if (!convId) return;
+      
       const { data: messagesData, error: supabaseError } = await supabase
         .from('messages')
         .select('*')
@@ -198,16 +226,20 @@ export function useMessages(conversationId: string | null, userId: string | unde
       safeSetState(setMessages, messagesWithSenders);
       safeSetState(setLoading, false);
     }
-  }, []); // Pas de dépendances - utilise les refs
+  }, [safeSetState]);
 
   // Fetch messages quand conversationId change
   useEffect(() => {
     fetchMessages();
   }, [conversationId, fetchMessages]);
 
-  // Real-time subscription (lecture reste via Supabase pour performance)
+  /**
+   * Real-time subscription avec déchiffrement ciblé
+   */
   useEffect(() => {
     if (!conversationId) return;
+
+    console.log('[Realtime] 📡 Abonnement aux messages de', conversationId);
 
     const channel = supabase
       .channel(`messages-${conversationId}`)
@@ -222,59 +254,99 @@ export function useMessages(conversationId: string | null, userId: string | unde
         async (payload) => {
           const newMessage = payload.new as Message;
           
-          console.log('[Realtime] 📨 Nouveau message détecté, rafraîchissement...');
+          console.log('[Realtime] 📨 Nouveau message détecté:', newMessage.id);
           
-          // Rafraîchir via le serveur Python pour obtenir le message déchiffré
-          await fetchMessages();
+          // Vérifier si le message existe déjà (éviter les doublons)
+          setMessages(prev => {
+            if (prev.some(m => m.id === newMessage.id)) {
+              console.log('[Realtime] ⚠️ Message déjà présent, ignoré');
+              return prev;
+            }
+            return prev; // On va le traiter ci-dessous
+          });
 
-          // Mark as read if not from current user
-          const currentUserId = userIdRef.current;
-          if (currentUserId && newMessage.sender_id !== currentUserId) {
-            await supabase
-              .from('messages')
-              .update({ is_read: true })
-              .eq('id', newMessage.id);
+          try {
+            // DÉCHIFFREMENT CIBLÉ: appeler /api/decrypt_message pour CE message uniquement
+            let decryptedContent = newMessage.content || '';
+            
+            if (newMessage.content && newMessage.content.startsWith('gAAAA')) {
+              console.log('[Realtime] 🔓 Déchiffrement du nouveau message...');
+              decryptedContent = await decryptSingleMessage(newMessage.content);
+            }
+
+            // Récupérer le profil du sender
+            const senderProfile = newMessage.sender_id 
+              ? await getProfile(newMessage.sender_id)
+              : null;
+
+            // Ajouter le message déchiffré au state
+            const messageWithSender: MessageWithSender = {
+              ...newMessage,
+              content: decryptedContent,
+              sender: senderProfile
+            };
+
+            safeSetState(setMessages, (prev: MessageWithSender[]) => {
+              // Double-check pour éviter les doublons
+              if (prev.some(m => m.id === newMessage.id)) {
+                return prev;
+              }
+              console.log('[Realtime] ✅ Message ajouté:', messageWithSender.id);
+              return [...prev, messageWithSender];
+            });
+
+            // Mark as read if not from current user
+            const currentUserId = userIdRef.current;
+            if (currentUserId && newMessage.sender_id !== currentUserId) {
+              await supabase
+                .from('messages')
+                .update({ is_read: true })
+                .eq('id', newMessage.id);
+            }
+          } catch (error) {
+            console.error('[Realtime] ❌ Erreur traitement message:', error);
+            // Fallback: refetch all messages
+            await fetchMessages();
+          }
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: 'DELETE',
+          schema: 'public',
+          table: 'messages',
+          filter: `conversation_id=eq.${conversationId}`
+        },
+        (payload) => {
+          const deletedId = payload.old?.id;
+          if (deletedId) {
+            console.log('[Realtime] 🗑️ Message supprimé:', deletedId);
+            safeSetState(setMessages, (prev: MessageWithSender[]) => 
+              prev.filter(m => m.id !== deletedId)
+            );
           }
         }
       )
       .subscribe();
 
     return () => {
+      console.log('[Realtime] 📴 Désabonnement de', conversationId);
       supabase.removeChannel(channel);
     };
-  }, [conversationId, fetchMessages]);
+  }, [conversationId, decryptSingleMessage, getProfile, safeSetState, fetchMessages]);
 
   /**
-   * ═══════════════════════════════════════════════════════════════════════════
-   * ENVOI DE MESSAGE - PASSAGE OBLIGATOIRE PAR LE SERVEUR PYTHON
-   * ═══════════════════════════════════════════════════════════════════════════
-   * 
-   * Cette fonction a été modifiée pour respecter l'architecture SAÉ 3.02:
-   * - Le message est envoyé au serveur Python via HTTP/TCP
-   * - Le serveur Python chiffre le message (Fernet/AES-128)
-   * - Le serveur Python insère dans Supabase avec SERVICE_ROLE_KEY
-   * 
-   * SI LE SERVEUR PYTHON EST DOWN, L'ENVOI ÉCHOUE (comportement voulu)
+   * Envoi de message via le serveur Python
    */
   const sendMessage = async (content: string, imageUrl?: string): Promise<{ error: Error | null }> => {
     if (!conversationId || !userId) {
       return { error: new Error('Invalid state: missing conversationId or userId') };
     }
 
-    // Vérification optionnelle - on log mais on ne bloque plus
-    const isServerUp = await checkServerHealth();
-    if (!isServerUp) {
-      console.warn('[sendMessage] ⚠️ Health check échoué, tentative d\'envoi quand même...');
-    }
-
     try {
       console.log('[sendMessage] 📤 Envoi via serveur Python...');
       
-      // ═══════════════════════════════════════════════════════════════════════
-      // REQUÊTE HTTP/TCP VERS LE SERVEUR PYTHON (Port 7860)
-      // ═══════════════════════════════════════════════════════════════════════
-      
-      // Construire le payload - ne pas inclure image_url si vide (évite erreur 422)
       const payload: Record<string, unknown> = {
         conversation_id: conversationId,
         sender_id: userId,
@@ -282,16 +354,13 @@ export function useMessages(conversationId: string | null, userId: string | unde
         encrypt: true,
       };
       
-      // Ajouter image_url seulement si présent
       if (imageUrl) {
         payload.image_url = imageUrl;
       }
       
       const response = await fetch(getEndpointUrl('SEND_MESSAGE'), {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
         signal: AbortSignal.timeout(SERVER_CONFIG.TIMEOUTS.REQUEST),
       });
@@ -303,25 +372,17 @@ export function useMessages(conversationId: string | null, userId: string | unde
 
       const result = await response.json();
       
-      console.log('[sendMessage] ✅ Message envoyé via serveur Python:', {
+      console.log('[sendMessage] ✅ Message envoyé:', {
         messageId: result.message_id,
         encrypted: result.encrypted,
-        timestamp: result.timestamp,
       });
 
-      // Petit délai pour laisser le temps à la DB de propager
-      await new Promise(resolve => setTimeout(resolve, 500));
-      
-      // Rafraîchir la liste pour récupérer le message déchiffré
-      console.log('[sendMessage] 🔄 Rafraîchissement des messages...');
-      await fetchMessages();
-
+      // Le message sera ajouté via Realtime (pas de double-ajout manuel)
       return { error: null };
 
     } catch (error) {
       console.error('[sendMessage] ❌ Erreur:', error);
       
-      // Message d'erreur explicite pour l'architecture Client/Serveur
       const errorMessage = error instanceof Error 
         ? error.message 
         : 'Erreur de communication avec le serveur Python';
@@ -329,7 +390,7 @@ export function useMessages(conversationId: string | null, userId: string | unde
       return { 
         error: new Error(
           `Échec de l'envoi via le serveur Python: ${errorMessage}. ` +
-          'Vérifiez que server.py est en cours d\'exécution sur le port 7860.'
+          'Vérifiez que le serveur est en cours d\'exécution.'
         )
       };
     }
@@ -340,6 +401,6 @@ export function useMessages(conversationId: string | null, userId: string | unde
     loading, 
     sendMessage, 
     refetch: fetchMessages,
-    serverAvailable, // Exposer l'état du serveur pour l'UI
+    serverAvailable,
   };
 }
