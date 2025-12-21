@@ -1,12 +1,10 @@
 /**
- * ═══════════════════════════════════════════════════════════════════════════════
- * Hook de Messages - Architecture Client/Serveur (SAÉ 3.02)
- * ═══════════════════════════════════════════════════════════════════════════════
+ * Hook de Messages avec déchiffrement temps réel
  * 
  * CORRECTIFS APPLIQUÉS:
- * - Déchiffrement ciblé via /api/decrypt_message pour les nouveaux messages
- * - Plus de fetchMessages() complet dans le handler Realtime
+ * - Déchiffrement ciblé via POST /api/decrypt_message pour les nouveaux messages Realtime
  * - Protection anti-unmount avec isMountedRef
+ * - Évite les fetchMessages() complets dans le handler Realtime
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react';
@@ -82,7 +80,7 @@ export function useMessages(conversationId: string | null, userId: string | unde
   }, []);
 
   /**
-   * Déchiffrer un seul message via le serveur Python
+   * Déchiffrer un seul message via POST /api/decrypt_message
    */
   const decryptSingleMessage = useCallback(async (encryptedContent: string): Promise<string> => {
     try {
@@ -104,7 +102,7 @@ export function useMessages(conversationId: string | null, userId: string | unde
       return data.decrypted || encryptedContent;
     } catch (error) {
       console.error('[decryptSingleMessage] ❌ Erreur:', error);
-      return encryptedContent; // Retourner le contenu original en cas d'échec
+      return encryptedContent;
     }
   }, []);
 
@@ -194,7 +192,7 @@ export function useMessages(conversationId: string | null, userId: string | unde
       isFetchingRef.current = false;
       console.error('[fetchMessages] ❌ Erreur, fallback Supabase direct:', error);
       
-      // Fallback: lecture directe depuis Supabase (messages resteront chiffrés)
+      // Fallback: lecture directe depuis Supabase
       const convId = conversationIdRef.current;
       if (!convId) return;
       
@@ -234,7 +232,7 @@ export function useMessages(conversationId: string | null, userId: string | unde
   }, [conversationId, fetchMessages]);
 
   /**
-   * Real-time subscription avec déchiffrement ciblé
+   * Real-time subscription avec déchiffrement ciblé immédiat
    */
   useEffect(() => {
     if (!conversationId) return;
@@ -258,7 +256,7 @@ export function useMessages(conversationId: string | null, userId: string | unde
           console.log('[Realtime] 📨 Nouveau message détecté:', newMessage.id);
 
           try {
-            // DÉCHIFFREMENT CIBLÉ: appeler /api/decrypt_message pour CE message uniquement
+            // DÉCHIFFREMENT IMMÉDIAT via POST /api/decrypt_message
             let decryptedContent = newMessage.content || '';
             
             if (newMessage.content && newMessage.content.startsWith('gAAAA')) {
@@ -271,11 +269,11 @@ export function useMessages(conversationId: string | null, userId: string | unde
               ? await getProfile(newMessage.sender_id)
               : null;
 
-            // Ajouter le message déchiffré au state (un seul setState pour éviter les race conditions)
             if (!isMountedRef.current) return;
             
+            // Ajouter le message déchiffré au state (un seul setState)
             setMessages((prev) => {
-              // Vérifier si le message existe déjà (éviter les doublons)
+              // Vérifier si le message existe déjà
               if (prev.some(m => m.id === newMessage.id)) {
                 console.log('[Realtime] ⚠️ Message déjà présent, ignoré');
                 return prev;
@@ -301,8 +299,6 @@ export function useMessages(conversationId: string | null, userId: string | unde
             }
           } catch (error) {
             console.error('[Realtime] ❌ Erreur traitement message:', error);
-            // Fallback: refetch all messages
-            await fetchMessages();
           }
         }
       )
@@ -330,7 +326,7 @@ export function useMessages(conversationId: string | null, userId: string | unde
       console.log('[Realtime] 📴 Désabonnement de', conversationId);
       supabase.removeChannel(channel);
     };
-  }, [conversationId, decryptSingleMessage, getProfile, safeSetState, fetchMessages]);
+  }, [conversationId, decryptSingleMessage, getProfile, safeSetState]);
 
   /**
    * Envoi de message via le serveur Python
@@ -373,7 +369,6 @@ export function useMessages(conversationId: string | null, userId: string | unde
         encrypted: result.encrypted,
       });
 
-      // Le message sera ajouté via Realtime (pas de double-ajout manuel)
       return { error: null };
 
     } catch (error) {
