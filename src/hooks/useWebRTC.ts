@@ -1,6 +1,7 @@
 /**
  * Hook WebRTC pour les appels audio/vidéo
  * Utilise le hook useSignaling pour l'échange de signaux
+ * FIX: Gestion correcte de la file d'attente ICE candidates
  */
 
 import { useState, useRef, useCallback, useEffect } from 'react';
@@ -10,6 +11,7 @@ const ICE_SERVERS: RTCConfiguration = {
   iceServers: [
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' },
+    { urls: 'stun:global.stun.twilio.com:3478' },
   ],
 };
 
@@ -23,6 +25,7 @@ export function useWebRTC(userId: string | undefined) {
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
 
   const pcRef = useRef<RTCPeerConnection | null>(null);
+  // FIX: File d'attente pour les ICE candidates reçus avant remoteDescription
   const pendingCandidatesRef = useRef<RTCIceCandidateInit[]>([]);
 
   const {
@@ -35,6 +38,25 @@ export function useWebRTC(userId: string | undefined) {
     endCall: signalingEndCall,
     setIncomingCall,
   } = useSignaling(userId);
+
+  // FIX: Fonction pour traiter les candidats en attente
+  const processPendingCandidates = useCallback(async (pc: RTCPeerConnection) => {
+    const count = pendingCandidatesRef.current.length;
+    if (count > 0) {
+      console.log('[WebRTC] 🧊 Traitement de', count, 'candidats en attente');
+    }
+    while (pendingCandidatesRef.current.length > 0) {
+      const candidate = pendingCandidatesRef.current.shift();
+      if (candidate) {
+        try {
+          await pc.addIceCandidate(new RTCIceCandidate(candidate));
+          console.log('[WebRTC] 🧊 Candidat ICE (queue) ajouté');
+        } catch (err) {
+          console.error('[WebRTC] ❌ Erreur ajout ICE candidate depuis queue:', err);
+        }
+      }
+    }
+  }, []);
 
   // Créer une nouvelle connexion peer
   const createPeerConnection = useCallback(() => {
@@ -94,6 +116,9 @@ export function useWebRTC(userId: string | undefined) {
 
     console.log('[WebRTC] 📞 Démarrage appel', type, 'vers', targetUserId);
     
+    // Réinitialiser la file d'attente
+    pendingCandidatesRef.current = [];
+    
     setCallType(type);
     setRemoteUserId(targetUserId);
     setCallState('calling');
@@ -107,6 +132,9 @@ export function useWebRTC(userId: string | undefined) {
     if (!incomingCall) return;
 
     console.log('[WebRTC] ✅ Acceptation appel de', incomingCall.from);
+    
+    // Réinitialiser la file d'attente
+    pendingCandidatesRef.current = [];
     
     setCallType(incomingCall.callType);
     setRemoteUserId(incomingCall.from);
@@ -127,12 +155,6 @@ export function useWebRTC(userId: string | undefined) {
       // Signaler l'acceptation
       signalingAcceptCall();
       
-      // Ajouter les candidats en attente
-      for (const candidate of pendingCandidatesRef.current) {
-        await pc.addIceCandidate(new RTCIceCandidate(candidate));
-      }
-      pendingCandidatesRef.current = [];
-      
     } catch (err) {
       console.error('[WebRTC] ❌ Erreur acceptation:', err);
       handleEndCall();
@@ -143,6 +165,7 @@ export function useWebRTC(userId: string | undefined) {
   const rejectCall = useCallback(() => {
     signalingRejectCall();
     setCallState('idle');
+    pendingCandidatesRef.current = [];
   }, [signalingRejectCall]);
 
   // Terminer un appel
@@ -220,16 +243,10 @@ export function useWebRTC(userId: string | undefined) {
 
           try {
             await pc.setRemoteDescription(new RTCSessionDescription(msg.payload as RTCSessionDescriptionInit));
+            console.log('[WebRTC] ✅ Remote Description définie (Offer)');
             
-            // FIX: Traiter les candidats en attente maintenant !
-            console.log('[WebRTC] 🧊 Traitement de', pendingCandidatesRef.current.length, 'candidats en attente (offer)');
-            while (pendingCandidatesRef.current.length > 0) {
-              const candidate = pendingCandidatesRef.current.shift();
-              if (candidate) {
-                await pc.addIceCandidate(new RTCIceCandidate(candidate));
-                console.log('[WebRTC] 🧊 Candidat ICE en attente ajouté');
-              }
-            }
+            // FIX CRITIQUE: Traiter les candidats en attente maintenant !
+            await processPendingCandidates(pc);
             
             // Créer et envoyer la réponse
             const answer = await pc.createAnswer();
@@ -252,16 +269,10 @@ export function useWebRTC(userId: string | undefined) {
 
           try {
             await pc.setRemoteDescription(new RTCSessionDescription(msg.payload as RTCSessionDescriptionInit));
+            console.log('[WebRTC] ✅ Remote Description définie (Answer)');
             
-            // FIX: Traiter les candidats en attente aussi ici !
-            console.log('[WebRTC] 🧊 Traitement de', pendingCandidatesRef.current.length, 'candidats en attente (answer)');
-            while (pendingCandidatesRef.current.length > 0) {
-              const candidate = pendingCandidatesRef.current.shift();
-              if (candidate) {
-                await pc.addIceCandidate(new RTCIceCandidate(candidate));
-                console.log('[WebRTC] 🧊 Candidat ICE en attente ajouté');
-              }
-            }
+            // FIX CRITIQUE: Traiter les candidats en attente aussi ici !
+            await processPendingCandidates(pc);
           } catch (err) {
             console.error('[WebRTC] ❌ Erreur traitement réponse:', err);
           }
@@ -280,7 +291,7 @@ export function useWebRTC(userId: string | undefined) {
               console.error('[WebRTC] ❌ Erreur ajout ICE candidate:', err);
             }
           } else {
-            // Stocker pour plus tard
+            // FIX: Stocker pour plus tard au lieu d'ignorer
             pendingCandidatesRef.current.push(candidate);
             console.log('[WebRTC] ⏳ ICE candidate en attente (queue size:', pendingCandidatesRef.current.length, ')');
           }
@@ -295,7 +306,7 @@ export function useWebRTC(userId: string | undefined) {
         }
       }
     });
-  }, [onMessage, callType, getLocalMedia, createPeerConnection, sendSignal, handleEndCall]);
+  }, [onMessage, callType, getLocalMedia, createPeerConnection, sendSignal, handleEndCall, processPendingCandidates]);
 
   // Mettre à jour l'état quand un appel entrant arrive
   useEffect(() => {
