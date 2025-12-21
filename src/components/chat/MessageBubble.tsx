@@ -100,6 +100,7 @@ export function MessageBubble({ message, isOwn, currentUserId, formatTime }: Mes
                     src={message.image_url}
                     messageId={message.id}
                     reporterId={currentUserId}
+                    createdAt={message.created_at || new Date().toISOString()}
                     duration={60}
                     isOwn={isOwn}
                   />
