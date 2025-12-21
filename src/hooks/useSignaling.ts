@@ -150,20 +150,22 @@ const connectSharedSocket = (uid: string) => {
       // Pas de reconnexion si c'est nous qui avons fermé
       if (s.manualClose) return;
 
+      // FIX: Ne pas reconnecter sur fermeture normale (1000) ou serveur-initiée (1012)
+      // Cela évite les boucles de reconnexion infinies
+      if (e.code === 1000 || e.code === 1012) {
+        console.log('[Signaling] Fermeture normale (code:', e.code, ') - pas de reconnexion auto');
+        return;
+      }
+
       // Reconnexion douce si on a au moins un listener actif
       if (s.messageListeners.size === 0 && s.connectionListeners.size === 0) return;
 
-      // Éviter un spam de reconnexion si le serveur ferme "normalement" en boucle
-      // (on espace un peu et on ne log pas à chaque fois)
+      // Reconnexion uniquement pour les erreurs réseau
+      console.warn('[Signaling] socket closed:', e.code, e.reason, '- reconnexion dans 3s');
       s.reconnectTimeout = setTimeout(() => {
-        // Toujours le même userId
         if (!sharedSocket || sharedSocket.userId !== uid) return;
         connectSharedSocket(uid);
       }, 3000);
-
-      if (e.code !== 1000) {
-        console.warn('[Signaling] socket closed:', e.code, e.reason);
-      }
     };
 
     ws.onerror = (err) => {
