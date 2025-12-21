@@ -252,18 +252,10 @@ export function useMessages(conversationId: string | null, userId: string | unde
           filter: `conversation_id=eq.${conversationId}`
         },
         async (payload) => {
+          if (!isMountedRef.current) return;
+          
           const newMessage = payload.new as Message;
-          
           console.log('[Realtime] 📨 Nouveau message détecté:', newMessage.id);
-          
-          // Vérifier si le message existe déjà (éviter les doublons)
-          setMessages(prev => {
-            if (prev.some(m => m.id === newMessage.id)) {
-              console.log('[Realtime] ⚠️ Message déjà présent, ignoré');
-              return prev;
-            }
-            return prev; // On va le traiter ci-dessous
-          });
 
           try {
             // DÉCHIFFREMENT CIBLÉ: appeler /api/decrypt_message pour CE message uniquement
@@ -279,18 +271,22 @@ export function useMessages(conversationId: string | null, userId: string | unde
               ? await getProfile(newMessage.sender_id)
               : null;
 
-            // Ajouter le message déchiffré au state
-            const messageWithSender: MessageWithSender = {
-              ...newMessage,
-              content: decryptedContent,
-              sender: senderProfile
-            };
-
-            safeSetState(setMessages, (prev: MessageWithSender[]) => {
-              // Double-check pour éviter les doublons
+            // Ajouter le message déchiffré au state (un seul setState pour éviter les race conditions)
+            if (!isMountedRef.current) return;
+            
+            setMessages((prev) => {
+              // Vérifier si le message existe déjà (éviter les doublons)
               if (prev.some(m => m.id === newMessage.id)) {
+                console.log('[Realtime] ⚠️ Message déjà présent, ignoré');
                 return prev;
               }
+              
+              const messageWithSender: MessageWithSender = {
+                ...newMessage,
+                content: decryptedContent,
+                sender: senderProfile
+              };
+              
               console.log('[Realtime] ✅ Message ajouté:', messageWithSender.id);
               return [...prev, messageWithSender];
             });
