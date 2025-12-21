@@ -485,6 +485,60 @@ async def report_message(payload: ReportPayload):
         raise HTTPException(status_code=500, detail=str(e))
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# WEBSOCKET - Signaling WebRTC (Appels Audio/Vidéo)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Connexions WebSocket signaling actives (par user_id)
+signaling_websockets: Dict[str, WebSocket] = {}
+
+@app.websocket("/ws/{user_id}")
+async def websocket_signaling(websocket: WebSocket, user_id: str):
+    """
+    WebSocket pour le signaling WebRTC (appels audio/vidéo).
+    Relaie les messages offer/answer/ice-candidate entre utilisateurs.
+    """
+    await websocket.accept()
+    signaling_websockets[user_id] = websocket
+    print(f"📞 [Signaling] Connecté: {user_id}")
+    
+    try:
+        while True:
+            data = await websocket.receive_text()
+            message = json.loads(data)
+            
+            target_id = message.get("target_id")
+            msg_type = message.get("type")
+            payload = message.get("payload")
+            
+            print(f"📞 [Signaling] {user_id} -> {target_id}: {msg_type}")
+            
+            # Relayer au destinataire
+            if target_id and target_id in signaling_websockets:
+                target_ws = signaling_websockets[target_id]
+                await target_ws.send_json({
+                    "type": msg_type,
+                    "sender_id": user_id,
+                    "payload": payload
+                })
+                print(f"✅ [Signaling] Message relayé à {target_id}")
+            else:
+                print(f"⚠️ [Signaling] Destinataire {target_id} non connecté")
+                # Notifier l'expéditeur que le destinataire n'est pas disponible
+                await websocket.send_json({
+                    "type": "error",
+                    "message": f"User {target_id} is not connected"
+                })
+                
+    except WebSocketDisconnect:
+        if user_id in signaling_websockets:
+            del signaling_websockets[user_id]
+        print(f"👋 [Signaling] Déconnecté: {user_id}")
+    except Exception as e:
+        print(f"❌ [Signaling] Erreur: {e}")
+        if user_id in signaling_websockets:
+            del signaling_websockets[user_id]
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # WEBSOCKET - Alternative pour Heartbeat (navigateurs ne supportent pas UDP)
 # ═══════════════════════════════════════════════════════════════════════════════
 
