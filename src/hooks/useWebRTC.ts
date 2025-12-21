@@ -56,7 +56,8 @@ export function useWebRTC(userId: string | undefined) {
 
     pc.oniceconnectionstatechange = () => {
       console.log('[WebRTC] 🔄 ICE state:', pc.iceConnectionState);
-      if (pc.iceConnectionState === 'connected') {
+      // FIX: Ajouter 'completed' (crucial sur certains réseaux)
+      if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
         setCallState('connected');
       } else if (pc.iceConnectionState === 'disconnected' || pc.iceConnectionState === 'failed') {
         handleEndCall();
@@ -109,7 +110,7 @@ export function useWebRTC(userId: string | undefined) {
     
     setCallType(incomingCall.callType);
     setRemoteUserId(incomingCall.from);
-    setCallState('connected');
+    // FIX: Ne pas mettre 'connected' ici, laisser l'état ICE le faire
 
     try {
       // Obtenir le média local
@@ -200,8 +201,7 @@ export function useWebRTC(userId: string | undefined) {
             if (senderId) {
               sendSignal(senderId, 'offer', offer);
             }
-            
-            setCallState('connected');
+            // FIX: Ne pas mettre 'connected' ici, laisser l'état ICE le faire
           } catch (err) {
             console.error('[WebRTC] ❌ Erreur création offre:', err);
             handleEndCall();
@@ -220,6 +220,16 @@ export function useWebRTC(userId: string | undefined) {
 
           try {
             await pc.setRemoteDescription(new RTCSessionDescription(msg.payload as RTCSessionDescriptionInit));
+            
+            // FIX: Traiter les candidats en attente maintenant !
+            console.log('[WebRTC] 🧊 Traitement de', pendingCandidatesRef.current.length, 'candidats en attente (offer)');
+            while (pendingCandidatesRef.current.length > 0) {
+              const candidate = pendingCandidatesRef.current.shift();
+              if (candidate) {
+                await pc.addIceCandidate(new RTCIceCandidate(candidate));
+                console.log('[WebRTC] 🧊 Candidat ICE en attente ajouté');
+              }
+            }
             
             // Créer et envoyer la réponse
             const answer = await pc.createAnswer();
@@ -242,6 +252,16 @@ export function useWebRTC(userId: string | undefined) {
 
           try {
             await pc.setRemoteDescription(new RTCSessionDescription(msg.payload as RTCSessionDescriptionInit));
+            
+            // FIX: Traiter les candidats en attente aussi ici !
+            console.log('[WebRTC] 🧊 Traitement de', pendingCandidatesRef.current.length, 'candidats en attente (answer)');
+            while (pendingCandidatesRef.current.length > 0) {
+              const candidate = pendingCandidatesRef.current.shift();
+              if (candidate) {
+                await pc.addIceCandidate(new RTCIceCandidate(candidate));
+                console.log('[WebRTC] 🧊 Candidat ICE en attente ajouté');
+              }
+            }
           } catch (err) {
             console.error('[WebRTC] ❌ Erreur traitement réponse:', err);
           }
@@ -249,20 +269,20 @@ export function useWebRTC(userId: string | undefined) {
         }
 
         case 'ice-candidate': {
-          console.log('[WebRTC] 🧊 ICE candidate reçu');
-          
           const pc = pcRef.current;
           const candidate = msg.payload as RTCIceCandidateInit;
           
           if (pc && pc.remoteDescription) {
             try {
               await pc.addIceCandidate(new RTCIceCandidate(candidate));
+              console.log('[WebRTC] 🧊 ICE candidate ajouté directement');
             } catch (err) {
               console.error('[WebRTC] ❌ Erreur ajout ICE candidate:', err);
             }
           } else {
             // Stocker pour plus tard
             pendingCandidatesRef.current.push(candidate);
+            console.log('[WebRTC] ⏳ ICE candidate en attente (queue size:', pendingCandidatesRef.current.length, ')');
           }
           break;
         }
