@@ -11,14 +11,16 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 
 export type CallState = 'idle' | 'calling' | 'ringing' | 'connected' | 'failed';
+export type CallType = 'audio' | 'video';
 
 interface UseWebRTCReturn {
   localStream: MediaStream | null;
   remoteStream: MediaStream | null;
   callState: CallState;
+  callType: CallType;
   isCaller: boolean;
   currentCall: { targetId: string | null; callerId: string | null };
-  callUser: (targetId: string) => Promise<void>;
+  callUser: (targetId: string, type?: CallType) => Promise<void>;
   acceptCall: () => Promise<void>;
   /**
    * Termine l'appel et envoie call-ended UNIQUEMENT si userInitiated === true.
@@ -33,9 +35,13 @@ export const useWebRTC = (
   signaling: any
 ): UseWebRTCReturn => {
   const [callState, setCallState] = useState<CallState>('idle');
+  const [callType, setCallType] = useState<CallType>('video');
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
   const [isCaller, setIsCaller] = useState(false);
+  
+  // Ref pour le type d'appel (évite les problèmes de closure)
+  const callTypeRef = useRef<CallType>('video');
 
   const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
@@ -55,17 +61,21 @@ export const useWebRTC = (
   // FIX: Ref synchrone pour savoir si on est l'appelant (évite race condition sur callState)
   const isCallerRef = useRef<boolean>(false);
 
-  // 1. Accès caméra/micro
-  const initializeLocalStream = useCallback(async (): Promise<boolean> => {
+  // 1. Accès caméra/micro selon le type d'appel
+  const initializeLocalStream = useCallback(async (type: CallType): Promise<boolean> => {
     try {
-      console.log('📹 Initialisation média...');
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: true,
-        audio: true
-      });
+      console.log(`📹 Initialisation média (${type})...`);
+      const constraints = {
+        audio: true,
+        video: type === 'video' // Seulement vidéo si c'est un appel vidéo
+      };
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
       localStreamRef.current = stream;
       setLocalStream(stream);
-      console.log('✅ Média initialisé');
+      console.log('✅ Média initialisé:', { 
+        audio: stream.getAudioTracks().length, 
+        video: stream.getVideoTracks().length 
+      });
       return true;
     } catch (error) {
       console.error('❌ Erreur média:', error);
@@ -103,13 +113,15 @@ export const useWebRTC = (
     setLocalStream(null);
     setRemoteStream(null);
     setCallState('idle');
+    setCallType('video');
     setIsCaller(false);
     
     // Reset refs
     currentCallRef.current = { targetId: null, callerId: null };
     isRemoteDescriptionSet.current = false;
     pendingCandidatesQueue.current = [];
-    isCallerRef.current = false; // FIX: Reset de la ref synchrone
+    isCallerRef.current = false;
+    callTypeRef.current = 'video';
   }, []); // PAS de dépendances = fonction stable
 
   /**
@@ -289,8 +301,14 @@ export const useWebRTC = (
             setCallState('ringing');
             currentCallRef.current = { targetId: sender_id, callerId: sender_id };
             setIsCaller(false);
+            
+            // Pour un appel entrant, on détecte le type via les tracks de l'offre
+            // Par défaut on utilise video, sera ajusté après connexion
+            const incomingType: CallType = 'video';
+            callTypeRef.current = incomingType;
+            setCallType(incomingType);
 
-            await initializeLocalStream();
+            await initializeLocalStream(incomingType);
 
             const pc = createPeerConnection(sender_id);
             peerConnectionRef.current = pc;
@@ -364,20 +382,22 @@ export const useWebRTC = (
   }, [signaling, callState, initializeLocalStream, createPeerConnection, processPendingCandidates, cleanupLocalResources]);
 
   // Appeler un utilisateur
-  const callUser = useCallback(async (targetId: string) => {
+  const callUser = useCallback(async (targetId: string, type: CallType = 'video') => {
     if (callState !== 'idle' || !currentUserId || !signaling) {
       console.log('⚠️ Impossible d\'appeler');
       return;
     }
 
     try {
-      console.log('📞 Appel vers', targetId);
+      console.log('📞 Appel vers', targetId, '- type:', type);
       setCallState('calling');
+      setCallType(type);
+      callTypeRef.current = type;
       setIsCaller(true);
-      isCallerRef.current = true; // FIX: Mise à jour synchrone
+      isCallerRef.current = true;
       currentCallRef.current = { targetId, callerId: currentUserId };
 
-      await initializeLocalStream();
+      await initializeLocalStream(type);
 
       const pc = createPeerConnection(targetId);
       peerConnectionRef.current = pc;
@@ -455,6 +475,7 @@ export const useWebRTC = (
     localStream,
     remoteStream,
     callState,
+    callType,
     isCaller,
     currentCall: currentCallRef.current,
     callUser,

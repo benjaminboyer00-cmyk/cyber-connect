@@ -30,6 +30,7 @@ export default function Index() {
   // WebRTC avec signaling passé en paramètre
   const {
     callState,
+    callType,
     localStream,
     remoteStream,
     isCaller,
@@ -145,9 +146,9 @@ export default function Index() {
   if (!user) return null;
 
   // Handlers pour les appels
-  const handleStartCall = (targetUserId: string, _type: 'audio' | 'video') => {
-    callUser(targetUserId);
-    toast.info('Appel en cours...');
+  const handleStartCall = (targetUserId: string, type: 'audio' | 'video') => {
+    callUser(targetUserId, type);
+    toast.info(`Appel ${type === 'video' ? 'vidéo' : 'audio'} en cours...`);
   };
 
   const handleAcceptCall = () => {
@@ -200,7 +201,7 @@ export default function Index() {
         isOpen={callState === 'ringing' && !!currentCall.callerId}
         callerName={callerProfile?.username || currentCall.callerId || 'Utilisateur'}
         callerAvatar={callerProfile?.avatar_url || undefined}
-        callType="video"
+        callType={callType}
         onAccept={handleAcceptCall}
         onReject={handleRejectCall}
       />
@@ -208,7 +209,7 @@ export default function Index() {
       {/* Interface d'appel en cours */}
       <CallInterface
         isOpen={callState === 'calling' || callState === 'connected'}
-        callType="video"
+        callType={callType}
         localStream={localStream}
         remoteStream={remoteStream}
         remoteName={remoteProfile?.username || 'Utilisateur'}
