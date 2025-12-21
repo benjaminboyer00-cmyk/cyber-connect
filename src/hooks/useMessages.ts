@@ -27,25 +27,41 @@ export interface MessageWithSender extends Message {
 }
 
 export function useMessages(conversationId: string | null, userId: string | undefined) {
+  // Tous les useState doivent être appelés dans le même ordre à chaque render
   const [messages, setMessages] = useState<MessageWithSender[]>([]);
   const [loading, setLoading] = useState(true);
   const [serverAvailable, setServerAvailable] = useState<boolean | null>(null);
   
-  // Refs pour éviter les boucles infinies
-  const conversationIdRef = useRef(conversationId);
-  const userIdRef = useRef(userId);
-  const isFetchingRef = useRef(false); // Empêche les appels concurrents
-  const lastFetchTimeRef = useRef(0); // Debounce
+  // Refs pour éviter les boucles infinies (refs sont stables entre les renders)
+  const conversationIdRef = useRef<string | null>(conversationId);
+  const userIdRef = useRef<string | undefined>(userId);
+  const isFetchingRef = useRef<boolean>(false);
+  const lastFetchTimeRef = useRef<number>(0);
+  const isMountedRef = useRef<boolean>(true);
   
   // Mettre à jour les refs quand les valeurs changent
   useEffect(() => {
     conversationIdRef.current = conversationId;
     userIdRef.current = userId;
   }, [conversationId, userId]);
+  
+  // Track mount state pour éviter les updates après unmount
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
 
   // Vérifier si le serveur Python est disponible au montage
   useEffect(() => {
-    checkServerHealth().then(setServerAvailable);
+    let cancelled = false;
+    checkServerHealth().then((result) => {
+      if (!cancelled && isMountedRef.current) {
+        setServerAvailable(result);
+      }
+    });
+    return () => { cancelled = true; };
   }, []);
 
   /**
@@ -77,6 +93,13 @@ export function useMessages(conversationId: string | null, userId: string | unde
     
     isFetchingRef.current = true;
     lastFetchTimeRef.current = now;
+    
+    // Helper pour set state seulement si monté
+    const safeSetState = <T,>(setter: React.Dispatch<React.SetStateAction<T>>, value: T) => {
+      if (isMountedRef.current) {
+        setter(value);
+      }
+    };
 
     try {
       console.log('[fetchMessages] 📥 Récupération via serveur Python (déchiffrement)...');
@@ -124,8 +147,8 @@ export function useMessages(conversationId: string | null, userId: string | unde
       const uniqueMessages = Array.from(new Map(messagesWithSenders.map(m => [m.id, m])).values());
 
       console.log('[fetchMessages] 🔄 Mise à jour du state avec', uniqueMessages.length, 'messages');
-      setMessages(uniqueMessages);
-      setLoading(false);
+      safeSetState(setMessages, uniqueMessages);
+      safeSetState(setLoading, false);
 
       // Mark messages as read
       if (uid && messagesData?.length) {
@@ -155,7 +178,7 @@ export function useMessages(conversationId: string | null, userId: string | unde
 
       if (supabaseError) {
         console.error('Error fetching messages:', supabaseError);
-        setLoading(false);
+        safeSetState(setLoading, false);
         return;
       }
 
@@ -172,8 +195,8 @@ export function useMessages(conversationId: string | null, userId: string | unde
         sender: m.sender_id ? profileMap.get(m.sender_id) || null : null
       }));
 
-      setMessages(messagesWithSenders);
-      setLoading(false);
+      safeSetState(setMessages, messagesWithSenders);
+      safeSetState(setLoading, false);
     }
   }, []); // Pas de dépendances - utilise les refs
 
