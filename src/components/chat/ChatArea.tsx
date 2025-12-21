@@ -6,13 +6,11 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { useChunkUpload } from '@/hooks/useChunkUpload';
 import { useVoiceRecorder } from '@/hooks/useVoiceRecorder';
-import { useWebRTC } from '@/hooks/useWebRTC';
 import { MessageBubble } from './MessageBubble';
-import { IncomingCallModal } from './IncomingCallModal';
-import { CallInterface } from './CallInterface';
 import { toast } from 'sonner';
 import type { Tables } from '@/integrations/supabase/types';
 import type { MessageWithSender } from '@/hooks/useMessages';
+import type { CallState } from '@/hooks/useWebRTC';
 
 type Profile = Tables<'profiles'>;
 
@@ -25,9 +23,25 @@ interface ChatAreaProps {
   isGroup?: boolean;
   groupName?: string;
   members?: Profile[];
+  // Props WebRTC depuis Index (optionnelles pour rétrocompatibilité)
+  callState?: CallState;
+  signalingConnected?: boolean;
+  onStartCall?: (targetUserId: string, type: 'audio' | 'video') => void;
 }
 
-export function ChatArea({ contact, messages, currentUserId, onSendMessage, loading, isGroup, groupName, members }: ChatAreaProps) {
+export function ChatArea({ 
+  contact, 
+  messages, 
+  currentUserId, 
+  onSendMessage, 
+  loading, 
+  isGroup, 
+  groupName, 
+  members,
+  callState = 'idle',
+  signalingConnected = false,
+  onStartCall,
+}: ChatAreaProps) {
   const [message, setMessage] = useState('');
   const [selectedImage, setSelectedImage] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
@@ -46,19 +60,6 @@ export function ChatArea({ contact, messages, currentUserId, onSendMessage, load
     formatDuration 
   } = useVoiceRecorder();
 
-  // WebRTC pour appels audio/vidéo
-  const {
-    callState,
-    callType,
-    localStream,
-    remoteStream,
-    incomingCall,
-    startCall,
-    acceptCall,
-    rejectCall,
-    endCall,
-  } = useWebRTC(currentUserId);
-
   // Auto-scroll vers le dernier message
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -70,31 +71,17 @@ export function ChatArea({ contact, messages, currentUserId, onSendMessage, load
 
   // Handlers pour les appels
   const handleStartAudioCall = () => {
-    if (contact?.id) {
-      startCall(contact.id, 'audio');
+    if (contact?.id && onStartCall) {
+      onStartCall(contact.id, 'audio');
       toast.info(`Appel audio vers ${contact.username || 'utilisateur'}...`);
     }
   };
 
   const handleStartVideoCall = () => {
-    if (contact?.id) {
-      startCall(contact.id, 'video');
+    if (contact?.id && onStartCall) {
+      onStartCall(contact.id, 'video');
       toast.info(`Appel vidéo vers ${contact.username || 'utilisateur'}...`);
     }
-  };
-
-  const handleAcceptCall = () => {
-    acceptCall();
-  };
-
-  const handleRejectCall = () => {
-    rejectCall();
-    toast.info('Appel refusé');
-  };
-
-  const handleEndCall = () => {
-    endCall();
-    toast.info('Appel terminé');
   };
 
   const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -264,26 +251,6 @@ export function ChatArea({ contact, messages, currentUserId, onSendMessage, load
           </Button>
         </div>
       </div>
-
-      {/* Modal appel entrant */}
-      <IncomingCallModal
-        isOpen={callState === 'receiving' && !!incomingCall}
-        callerName={incomingCall?.from || 'Utilisateur'}
-        callType={incomingCall?.callType || 'audio'}
-        onAccept={handleAcceptCall}
-        onReject={handleRejectCall}
-      />
-
-      {/* Interface d'appel en cours */}
-      <CallInterface
-        isOpen={callState === 'calling' || callState === 'connected'}
-        callType={callType}
-        localStream={localStream}
-        remoteStream={remoteStream}
-        remoteName={contact?.username || 'Utilisateur'}
-        remoteAvatar={contact?.avatar_url || undefined}
-        onEndCall={handleEndCall}
-      />
 
       {/* Messages */}
       <ScrollArea className="flex-1 p-6 scrollbar-thin">

@@ -5,12 +5,15 @@ import { useProfile } from '@/hooks/useProfile';
 import { useFriends } from '@/hooks/useFriends';
 import { useConversations } from '@/hooks/useConversations';
 import { useMessages } from '@/hooks/useMessages';
+import { useWebRTC } from '@/hooks/useWebRTC';
 import { Sidebar } from '@/components/chat/Sidebar';
 import { ChatArea } from '@/components/chat/ChatArea';
 import { SearchUsersModal } from '@/components/friends/SearchUsersModal';
 import { FriendRequestsModal } from '@/components/friends/FriendRequestsModal';
 import { NewChatModal } from '@/components/friends/NewChatModal';
 import { CreateGroupModal } from '@/components/friends/CreateGroupModal';
+import { IncomingCallModal } from '@/components/chat/IncomingCallModal';
+import { CallInterface } from '@/components/chat/CallInterface';
 import { toast } from 'sonner';
 
 export default function Index() {
@@ -20,6 +23,20 @@ export default function Index() {
   const { friends, pendingRequests, searchUsers, sendFriendRequest, acceptFriendRequest, rejectFriendRequest } = useFriends(user?.id);
   const { conversations, createConversation, createGroupConversation, deleteConversation, refetch: refetchConversations } = useConversations(user?.id);
   
+  // WebRTC au niveau global pour recevoir les appels même sans conversation ouverte
+  const {
+    callState,
+    callType,
+    localStream,
+    remoteStream,
+    incomingCall,
+    signalingConnected,
+    startCall,
+    acceptCall,
+    rejectCall,
+    endCall,
+  } = useWebRTC(user?.id);
+
   const [selectedConversation, setSelectedConversation] = useState<string | null>(null);
   const [searchModalOpen, setSearchModalOpen] = useState(false);
   const [requestsModalOpen, setRequestsModalOpen] = useState(false);
@@ -31,6 +48,28 @@ export default function Index() {
   // Get contact for selected conversation
   const selectedConv = conversations.find(c => c.id === selectedConversation);
   const contact = selectedConv?.members[0] || null;
+  
+  // Trouver le profil de l'appelant pour afficher son nom
+  const getCallerProfile = () => {
+    if (!incomingCall) return null;
+    // Chercher dans les amis
+    const friend = friends.find(f => f.profile?.id === incomingCall.from);
+    return friend?.profile || null;
+  };
+  
+  const callerProfile = getCallerProfile();
+  
+  // Trouver le profil du destinataire actuel de l'appel
+  const getRemoteProfile = () => {
+    // Si on est en appel avec quelqu'un, trouver son profil
+    if (callState === 'calling' || callState === 'connected') {
+      // Le contact de la conversation actuelle ou l'appelant
+      return contact || callerProfile;
+    }
+    return callerProfile;
+  };
+  
+  const remoteProfile = getRemoteProfile();
 
   // Redirect to auth if not logged in
   useEffect(() => {
@@ -101,6 +140,22 @@ export default function Index() {
 
   if (!user) return null;
 
+  // Handlers pour les appels
+  const handleAcceptCall = () => {
+    acceptCall();
+    toast.success('Appel accepté');
+  };
+
+  const handleRejectCall = () => {
+    rejectCall();
+    toast.info('Appel refusé');
+  };
+
+  const handleEndCall = () => {
+    endCall();
+    toast.info('Appel terminé');
+  };
+
   return (
     <div className="dark min-h-screen h-screen bg-background flex overflow-hidden">
       <Sidebar
@@ -126,6 +181,31 @@ export default function Index() {
         isGroup={selectedConv?.is_group || false}
         groupName={selectedConv?.name || ''}
         members={selectedConv?.members || []}
+        // Props WebRTC passées depuis Index
+        callState={callState}
+        signalingConnected={signalingConnected}
+        onStartCall={startCall}
+      />
+
+      {/* Modal appel entrant - au niveau global */}
+      <IncomingCallModal
+        isOpen={callState === 'receiving' && !!incomingCall}
+        callerName={callerProfile?.username || incomingCall?.from || 'Utilisateur'}
+        callerAvatar={callerProfile?.avatar_url || undefined}
+        callType={incomingCall?.callType || 'audio'}
+        onAccept={handleAcceptCall}
+        onReject={handleRejectCall}
+      />
+
+      {/* Interface d'appel en cours - au niveau global */}
+      <CallInterface
+        isOpen={callState === 'calling' || callState === 'connected'}
+        callType={callType}
+        localStream={localStream}
+        remoteStream={remoteStream}
+        remoteName={remoteProfile?.username || 'Utilisateur'}
+        remoteAvatar={remoteProfile?.avatar_url || undefined}
+        onEndCall={handleEndCall}
       />
 
       <SearchUsersModal

@@ -8,6 +8,7 @@ interface EphemeralImageProps {
   src: string;
   messageId: string;
   reporterId: string;
+  createdAt: string; // Date de création du message (pour persistance du timer)
   duration?: number; // Durée en secondes (défaut: 60)
   isOwn?: boolean;
 }
@@ -16,12 +17,22 @@ export function EphemeralImage({
   src, 
   messageId, 
   reporterId, 
+  createdAt,
   duration = 60,
   isOwn = false 
 }: EphemeralImageProps) {
-  const [timeLeft, setTimeLeft] = useState(duration);
-  const [isExpired, setIsExpired] = useState(false);
-  const [isLoaded, setIsLoaded] = useState(false); // Timer starts only after image loads
+  // Calcul du temps restant basé sur created_at (persistance même après refresh)
+  const calculateTimeLeft = useCallback(() => {
+    const createdTime = new Date(createdAt).getTime();
+    const now = Date.now();
+    const elapsedSeconds = Math.floor((now - createdTime) / 1000);
+    return Math.max(0, duration - elapsedSeconds);
+  }, [createdAt, duration]);
+
+  const initialTimeLeft = calculateTimeLeft();
+  const [timeLeft, setTimeLeft] = useState(initialTimeLeft);
+  const [isExpired, setIsExpired] = useState(initialTimeLeft <= 0);
+  const [isLoaded, setIsLoaded] = useState(false);
   const [isReporting, setIsReporting] = useState(false);
   const [hasReported, setHasReported] = useState(false);
   const [loadError, setLoadError] = useState(false);
@@ -31,18 +42,16 @@ export function EphemeralImage({
     if (isExpired || !isLoaded) return;
 
     const timer = setInterval(() => {
-      setTimeLeft(prev => {
-        if (prev <= 1) {
-          setIsExpired(true);
-          clearInterval(timer);
-          return 0;
-        }
-        return prev - 1;
-      });
+      const remaining = calculateTimeLeft();
+      setTimeLeft(remaining);
+      if (remaining <= 0) {
+        setIsExpired(true);
+        clearInterval(timer);
+      }
     }, 1000);
 
     return () => clearInterval(timer);
-  }, [isExpired, isLoaded]);
+  }, [isExpired, isLoaded, calculateTimeLeft]);
 
   // Report image
   const handleReport = useCallback(async () => {
