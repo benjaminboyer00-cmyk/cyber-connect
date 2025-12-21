@@ -1,10 +1,10 @@
 /**
- * Hook WebSocket pour le signaling WebRTC (appels audio/vidéo)
+ * Hook WebSocket pour le signaling WebRTC
  *
- * Objectif (stabilité):
- * - Conserver UN SEUL WebSocket actif pendant toute la session utilisateur (singleton hors hook)
- * - Éviter les boucles de fermeture/reconnexion (Code 1000) causées par un cleanup React (StrictMode/HMR)
- * - Réduire le bruit console (pas de spam ping/pong / ice-candidate)
+ * CORRECTIFS APPLIQUÉS:
+ * - useRef pour le WebSocket (empêche doubles connexions)
+ * - Pas de reconnexion sur code 1000 (Normal Closure)
+ * - Ping/heartbeat toutes les 20 secondes vers HuggingFace
  */
 
 import { useState, useEffect, useRef, useCallback } from 'react';
@@ -39,7 +39,7 @@ type SharedSignalingSocket = {
   connectionListeners: Set<ConnectionListener>;
 };
 
-// Singleton global: persiste même si les composants montent/démontent.
+// Singleton global (useRef au niveau module)
 let sharedSocket: SharedSignalingSocket | null = null;
 
 const buildWsUrl = (uid: string) => {
@@ -110,14 +110,21 @@ const connectSharedSocket = (uid: string) => {
 
   const current = sharedSocket;
 
-  // Protection multi-connexion
-  if (current.isConnecting) return;
-  if (current.ws?.readyState === WebSocket.OPEN || current.ws?.readyState === WebSocket.CONNECTING) return;
+  // Protection multi-connexion via isConnecting (useRef pattern)
+  if (current.isConnecting) {
+    console.log('[Signaling] Connexion déjà en cours, ignoré');
+    return;
+  }
+  if (current.ws?.readyState === WebSocket.OPEN || current.ws?.readyState === WebSocket.CONNECTING) {
+    console.log('[Signaling] WebSocket déjà connecté/en cours');
+    return;
+  }
 
   clearSharedTimers();
 
   current.isConnecting = true;
   const url = buildWsUrl(uid);
+  console.log('[Signaling] Connexion WebSocket vers:', url);
 
   try {
     const ws = new WebSocket(url);
@@ -125,43 +132,56 @@ const connectSharedSocket = (uid: string) => {
 
     ws.onopen = () => {
       if (!sharedSocket) return;
+      console.log('[Signaling] ✅ WebSocket connecté');
       sharedSocket.isConnecting = false;
       notifyConnection(true);
 
-      // Heartbeat (HF): ping toutes les 25s (sans spam console)
+      // Heartbeat toutes les 20 secondes (HuggingFace)
       clearSharedTimers();
       sharedSocket.pingInterval = setInterval(() => {
         const s = sharedSocket;
         if (!s?.ws || s.ws.readyState !== WebSocket.OPEN) return;
         s.ws.send(JSON.stringify({ type: 'ping' }));
-      }, 25000);
+      }, 20000); // 20 secondes
     };
 
     ws.onclose = (e) => {
       const s = sharedSocket;
       if (!s) return;
 
+      console.log('[Signaling] WebSocket fermé - code:', e.code, 'reason:', e.reason);
       s.isConnecting = false;
       s.ws = null;
       notifyConnection(false);
 
       clearSharedTimers();
 
-      // Pas de reconnexion si c'est nous qui avons fermé
-      if (s.manualClose) return;
-
-      // FIX: Ne pas reconnecter sur fermeture normale (1000) ou serveur-initiée (1012)
-      // Cela évite les boucles de reconnexion infinies
-      if (e.code === 1000 || e.code === 1012) {
-        console.log('[Signaling] Fermeture normale (code:', e.code, ') - pas de reconnexion auto');
+      // Pas de reconnexion si fermeture manuelle
+      if (s.manualClose) {
+        console.log('[Signaling] Fermeture manuelle - pas de reconnexion');
         return;
       }
 
-      // Reconnexion douce si on a au moins un listener actif
-      if (s.messageListeners.size === 0 && s.connectionListeners.size === 0) return;
+      // NE PAS reconnecter sur code 1000 (Normal Closure)
+      if (e.code === 1000) {
+        console.log('[Signaling] Fermeture normale (1000) - pas de reconnexion auto');
+        return;
+      }
 
-      // Reconnexion uniquement pour les erreurs réseau
-      console.warn('[Signaling] socket closed:', e.code, e.reason, '- reconnexion dans 3s');
+      // NE PAS reconnecter sur code 1012 (Server-initiated)
+      if (e.code === 1012) {
+        console.log('[Signaling] Fermeture serveur (1012) - pas de reconnexion auto');
+        return;
+      }
+
+      // Reconnexion uniquement si on a des listeners actifs
+      if (s.messageListeners.size === 0 && s.connectionListeners.size === 0) {
+        console.log('[Signaling] Aucun listener actif - pas de reconnexion');
+        return;
+      }
+
+      // Reconnexion pour les erreurs réseau
+      console.warn('[Signaling] Reconnexion dans 3s (code:', e.code, ')');
       s.reconnectTimeout = setTimeout(() => {
         if (!sharedSocket || sharedSocket.userId !== uid) return;
         connectSharedSocket(uid);
@@ -178,7 +198,7 @@ const connectSharedSocket = (uid: string) => {
       try {
         const data: SignalMessage = JSON.parse(event.data);
 
-        if (data.type === 'pong') return;
+        if (data.type === 'pong') return; // Ignore pong silencieusement
 
         if (shouldLogSignal(data.type)) {
           console.log('[Signaling] 📨', data.type, 'de', data.sender_id);
@@ -190,11 +210,6 @@ const connectSharedSocket = (uid: string) => {
       }
     };
 
-    // sync état au cas où
-    if (ws.readyState === WebSocket.OPEN) {
-      current.isConnecting = false;
-      notifyConnection(true);
-    }
   } catch (err) {
     current.isConnecting = false;
     console.error('[Signaling] WebSocket creation error:', err);
@@ -202,9 +217,8 @@ const connectSharedSocket = (uid: string) => {
 };
 
 const ensureSharedSocket = (uid: string) => {
-  // Si on change d'utilisateur, on ferme l'ancien singleton
+  // Si on change d'utilisateur, fermer l'ancien singleton
   if (sharedSocket && sharedSocket.userId !== uid) {
-    // fermeture volontaire (pas de reconnexion)
     sharedSocket.manualClose = true;
     clearSharedTimers();
     try {
@@ -244,7 +258,6 @@ export function useSignaling(userId: string | undefined) {
 
   const handleSharedMessage = useCallback(
     (data: SignalMessage) => {
-      // Gérer les appels entrants localement
       if (data.type === 'call-request' && data.sender_id) {
         const payload = data.payload as { callType?: 'audio' | 'video' };
         setIncomingCall({ from: data.sender_id, callType: payload?.callType || 'audio' });
@@ -274,7 +287,7 @@ export function useSignaling(userId: string | undefined) {
     shared.messageListeners.add(handleSharedMessage);
     shared.connectionListeners.add(connectionListener);
 
-    // sync
+    // sync initial
     setIsConnected(shared.ws?.readyState === WebSocket.OPEN);
 
     // Cleanup: on se désabonne seulement (NE PAS fermer le WS ici)
@@ -300,7 +313,6 @@ export function useSignaling(userId: string | undefined) {
       })
     );
 
-    // Log uniquement pour les signaux "appel"
     if (type !== 'ice-candidate') {
       console.log('[Signaling] 📤', type, '->', targetId);
     }

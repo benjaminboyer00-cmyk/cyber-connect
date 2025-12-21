@@ -2,10 +2,11 @@
  * Hook WebRTC pour les appels audio/vidéo
  * 
  * CORRECTIFS APPLIQUÉS:
- * - cleanupLocalResources() séparé de endCall() pour éviter la dépendance circulaire
- * - endCall() envoie le signal SEULEMENT sur action utilisateur
- * - createPeerConnection n'appelle plus endCall() directement
- * - File d'attente ICE rigoureuse (addIceCandidate SEULEMENT après remoteDescription)
+ * - cleanupLocalResources() séparé de endCall() - N'ENVOIE PAS de signal
+ * - endCall() envoie le signal SEULEMENT sur action utilisateur explicite
+ * - isCallerRef pour éviter les race conditions
+ * - pendingCandidatesQueue vidée immédiatement après setRemoteDescription
+ * - Configuration TURN Metered.ca (ports 80, 443, UDP et TCP)
  */
 
 import { useState, useEffect, useRef, useCallback } from 'react';
@@ -22,10 +23,6 @@ interface UseWebRTCReturn {
   currentCall: { targetId: string | null; callerId: string | null };
   callUser: (targetId: string, type?: CallType) => Promise<void>;
   acceptCall: () => Promise<void>;
-  /**
-   * Termine l'appel et envoie call-ended UNIQUEMENT si userInitiated === true.
-   * Par défaut userInitiated=false → nettoie les ressources sans envoyer de signal.
-   */
   endCall: (userInitiated?: boolean) => void;
   rejectCall: () => void;
 }
@@ -40,13 +37,14 @@ export const useWebRTC = (
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
   const [isCaller, setIsCaller] = useState(false);
   
-  // Ref pour le type d'appel (évite les problèmes de closure)
+  // Refs pour éviter les race conditions
   const callTypeRef = useRef<CallType>('video');
-
+  const isCallerRef = useRef<boolean>(false);
+  
   const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
 
-  // File d'attente ICE candidates (FIX CRITIQUE)
+  // File d'attente ICE candidates
   const pendingCandidatesQueue = useRef<RTCIceCandidateInit[]>([]);
   const isRemoteDescriptionSet = useRef<boolean>(false);
 
@@ -55,19 +53,16 @@ export const useWebRTC = (
     callerId: string | null;
   }>({ targetId: null, callerId: null });
 
-  // Timeout pour ICE disconnected/failed
+  // Timeout pour ICE failed
   const disconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  // FIX: Ref synchrone pour savoir si on est l'appelant (évite race condition sur callState)
-  const isCallerRef = useRef<boolean>(false);
-
-  // 1. Accès caméra/micro selon le type d'appel
+  // Accès caméra/micro selon le type d'appel
   const initializeLocalStream = useCallback(async (type: CallType): Promise<boolean> => {
     try {
       console.log(`📹 Initialisation média (${type})...`);
       const constraints = {
         audio: true,
-        video: type === 'video' // Seulement vidéo si c'est un appel vidéo
+        video: type === 'video'
       };
       const stream = await navigator.mediaDevices.getUserMedia(constraints);
       localStreamRef.current = stream;
@@ -85,7 +80,7 @@ export const useWebRTC = (
   }, []);
 
   /**
-   * NOUVEAU: Nettoyage des ressources locales SANS envoyer de signal
+   * Nettoyage des ressources locales SANS envoyer de signal
    * Cette fonction est stable (pas de dépendances variables)
    */
   const cleanupLocalResources = useCallback(() => {
@@ -122,12 +117,11 @@ export const useWebRTC = (
     pendingCandidatesQueue.current = [];
     isCallerRef.current = false;
     callTypeRef.current = 'video';
-  }, []); // PAS de dépendances = fonction stable
+  }, []);
 
   /**
    * Fin d'appel.
    * @param userInitiated - Doit être explicitement `true` pour envoyer le signal call-ended.
-   *                        Empêche tout envoi automatique (cleanup, unmount, etc.)
    */
   const endCall = useCallback((userInitiated = false) => {
     if (userInitiated) {
@@ -141,32 +135,67 @@ export const useWebRTC = (
       }
     }
 
-    // Toujours nettoyer les ressources
+    // Toujours nettoyer les ressources (SANS envoyer de signal)
     cleanupLocalResources();
   }, [signaling, cleanupLocalResources]);
 
   /**
-   * Création PeerConnection
-   * N'utilise plus endCall() - utilise cleanupLocalResources() pour les échecs
+   * Vidage immédiat de la file d'attente ICE après setRemoteDescription
+   */
+  const processPendingCandidates = useCallback(async () => {
+    if (!peerConnectionRef.current) return;
+
+    const candidates = [...pendingCandidatesQueue.current];
+    pendingCandidatesQueue.current = []; // Vider immédiatement
+
+    console.log(`🔄 Traitement ${candidates.length} ICE en attente`);
+
+    for (const candidate of candidates) {
+      try {
+        await peerConnectionRef.current.addIceCandidate(new RTCIceCandidate(candidate));
+        console.log('✅ ICE ajouté depuis file');
+      } catch (e) {
+        console.error('❌ Erreur ICE delayed:', e);
+      }
+    }
+  }, []);
+
+  /**
+   * Création PeerConnection avec configuration TURN Metered.ca
    */
   const createPeerConnection = useCallback((targetId: string) => {
     console.log('🔧 Création PeerConnection vers', targetId);
     
-    // Configuration ICE Metered.ca officielle
+    // Configuration ICE Metered.ca (ports 80, 443, UDP et TCP)
     const pc = new RTCPeerConnection({
       iceServers: [
         { urls: "stun:stun.l.google.com:19302" },
         { urls: "stun:stun.relay.metered.ca:80" },
+        // TURN UDP port 80
         {
           urls: "turn:standard.relay.metered.ca:80",
           username: "2ce8447dffad525621446d76",
           credential: "vQ4YEJGIKoc9MmTx",
         },
+        // TURN UDP port 443
         {
           urls: "turn:standard.relay.metered.ca:443",
           username: "2ce8447dffad525621446d76",
           credential: "vQ4YEJGIKoc9MmTx",
         },
+        // TURN TCP port 80
+        {
+          urls: "turn:standard.relay.metered.ca:80?transport=tcp",
+          username: "2ce8447dffad525621446d76",
+          credential: "vQ4YEJGIKoc9MmTx",
+        },
+        // TURN TCP port 443
+        {
+          urls: "turn:standard.relay.metered.ca:443?transport=tcp",
+          username: "2ce8447dffad525621446d76",
+          credential: "vQ4YEJGIKoc9MmTx",
+        },
+        // TURNS (TLS) port 443
         {
           urls: "turns:standard.relay.metered.ca:443?transport=tcp",
           username: "2ce8447dffad525621446d76",
@@ -175,25 +204,19 @@ export const useWebRTC = (
       ],
     });
 
-    // Logs utiles pour diagnostiquer les chutes d'appel
     pc.onicegatheringstatechange = () => {
       console.log('🧊 ICE gathering state:', pc.iceGatheringState);
     };
-
     
     pc.onicecandidateerror = (event: any) => {
       console.error('🧊❌ ICE candidate error:', {
         errorCode: event?.errorCode,
         errorText: event?.errorText,
         url: event?.url,
-        address: event?.address,
-        port: event?.port,
       });
     };
 
     pc.onconnectionstatechange = () => {
-      // Ne pas raccrocher/cleaner sur des états transitoires ici.
-      // La logique "fatale" est gérée via iceConnectionState === 'failed'.
       if (pc.connectionState === 'failed') {
         console.warn('🔗 connectionState failed');
       }
@@ -227,13 +250,11 @@ export const useWebRTC = (
       }
 
       if (pc.iceConnectionState === 'disconnected') {
-        // IMPORTANT: ne plus auto-terminer l'appel sur disconnected.
-        // On tente plutôt un restart ICE, et on laisse l'utilisateur raccrocher si besoin.
-        console.log('⚠️ ICE disconnected - tentative restartIce (pas de cleanup auto)');
+        console.log('⚠️ ICE disconnected - tentative restartIce');
         try {
           pc.restartIce();
         } catch (e) {
-          console.log('⚠️ restartIce indisponible/échoué:', e);
+          console.log('⚠️ restartIce indisponible:', e);
         }
         return;
       }
@@ -256,26 +277,7 @@ export const useWebRTC = (
     };
 
     return pc;
-  }, [signaling, cleanupLocalResources]); // PAS endCall dans les dépendances!
-
-  // Vidage file d'attente ICE
-  const processPendingCandidates = useCallback(async () => {
-    if (!peerConnectionRef.current) return;
-
-    console.log(`🔄 Traitement ${pendingCandidatesQueue.current.length} ICE en attente`);
-
-    while (pendingCandidatesQueue.current.length > 0) {
-      const candidate = pendingCandidatesQueue.current.shift();
-      if (candidate) {
-        try {
-          await peerConnectionRef.current.addIceCandidate(new RTCIceCandidate(candidate));
-          console.log('✅ ICE ajouté depuis file');
-        } catch (e) {
-          console.error('❌ Erreur ICE delayed:', e);
-        }
-      }
-    }
-  }, []);
+  }, [signaling, cleanupLocalResources]);
 
   // Gestionnaire signaux WebSocket
   useEffect(() => {
@@ -291,7 +293,6 @@ export const useWebRTC = (
 
       switch (type) {
         case 'offer':
-          // Ignorer si déjà en appel
           if (callState !== 'idle' && callState !== 'ringing') {
             console.log('⚠️ Déjà en appel, ignore offre');
             return;
@@ -301,9 +302,8 @@ export const useWebRTC = (
             setCallState('ringing');
             currentCallRef.current = { targetId: sender_id, callerId: sender_id };
             setIsCaller(false);
+            isCallerRef.current = false;
             
-            // Pour un appel entrant, on détecte le type via les tracks de l'offre
-            // Par défaut on utilise video, sera ajusté après connexion
             const incomingType: CallType = 'video';
             callTypeRef.current = incomingType;
             setCallType(incomingType);
@@ -324,6 +324,7 @@ export const useWebRTC = (
             await pc.setRemoteDescription(new RTCSessionDescription(payload));
             isRemoteDescriptionSet.current = true;
 
+            // Vider immédiatement la file d'attente ICE
             await processPendingCandidates();
             console.log('🔔 Appel entrant prêt - en attente acceptation');
 
@@ -334,7 +335,7 @@ export const useWebRTC = (
           break;
 
         case 'answer':
-          // FIX: Utiliser isCallerRef au lieu de callState (évite race condition)
+          // Utiliser isCallerRef au lieu de callState (évite race condition)
           if (!isCallerRef.current || !peerConnectionRef.current) {
             console.log('⚠️ Pas en appel sortant (isCallerRef:', isCallerRef.current, ')');
             return;
@@ -343,6 +344,8 @@ export const useWebRTC = (
           try {
             await peerConnectionRef.current.setRemoteDescription(new RTCSessionDescription(payload));
             isRemoteDescriptionSet.current = true;
+            
+            // Vider immédiatement la file d'attente ICE
             await processPendingCandidates();
             console.log('✅ Réponse traitée');
           } catch (error) {
@@ -353,10 +356,8 @@ export const useWebRTC = (
 
         case 'ice-candidate':
           try {
-            // CRITIQUE: Ne faire addIceCandidate QUE si remoteDescription est set
             if (isRemoteDescriptionSet.current && peerConnectionRef.current) {
               await peerConnectionRef.current.addIceCandidate(new RTCIceCandidate(payload));
-              console.log('✅ ICE ajouté immédiatement');
             } else {
               pendingCandidatesQueue.current.push(payload);
               console.log('📦 ICE mis en file (remoteDesc pas encore set)');
@@ -451,11 +452,11 @@ export const useWebRTC = (
     cleanupLocalResources();
   }, [callState, signaling, cleanupLocalResources]);
 
-  // Cleanup au démontage - DIRECT sans dépendance (évite cleanup intempestif sur HMR)
+  // Cleanup au démontage - UNIQUEMENT cleanupLocalResources (pas d'envoi de signal)
   useEffect(() => {
     return () => {
       console.log('🧹 useWebRTC unmount cleanup');
-      // Cleanup DIRECT (pas via cleanupLocalResources pour éviter problèmes de dépendances)
+      // Cleanup DIRECT sans envoyer de signal
       if (disconnectTimeoutRef.current) {
         clearTimeout(disconnectTimeoutRef.current);
         disconnectTimeoutRef.current = null;
@@ -469,7 +470,7 @@ export const useWebRTC = (
         localStreamRef.current = null;
       }
     };
-  }, []); // IMPORTANT: [] = seulement au vrai démontage, pas sur re-render
+  }, []);
 
   return {
     localStream,
