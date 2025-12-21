@@ -161,7 +161,7 @@ export default function Index() {
   };
 
   const handleEndCall = () => {
-    endCall();
+    endCall(true); // userInitiated = true → envoie call-ended
     toast.info('Appel terminé');
   };
 

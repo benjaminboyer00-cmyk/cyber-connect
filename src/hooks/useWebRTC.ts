@@ -20,7 +20,11 @@ interface UseWebRTCReturn {
   currentCall: { targetId: string | null; callerId: string | null };
   callUser: (targetId: string) => Promise<void>;
   acceptCall: () => Promise<void>;
-  endCall: () => void;
+  /**
+   * Termine l'appel et envoie call-ended UNIQUEMENT si userInitiated === true.
+   * Par défaut userInitiated=false → nettoie les ressources sans envoyer de signal.
+   */
+  endCall: (userInitiated?: boolean) => void;
   rejectCall: () => void;
 }
 
@@ -105,19 +109,23 @@ export const useWebRTC = (
   }, []); // PAS de dépendances = fonction stable
 
   /**
-   * Fin d'appel par action utilisateur - ENVOIE le signal call-ended
+   * Fin d'appel.
+   * @param userInitiated - Doit être explicitement `true` pour envoyer le signal call-ended.
+   *                        Empêche tout envoi automatique (cleanup, unmount, etc.)
    */
-  const endCall = useCallback(() => {
-    console.log('🛑 Fin d\'appel (action utilisateur)');
+  const endCall = useCallback((userInitiated = false) => {
+    if (userInitiated) {
+      console.log('🛑 Fin d\'appel (action utilisateur)');
 
-    // Envoyer le signal de fin AVANT de nettoyer
-    if (currentCallRef.current.targetId && signaling) {
-      signaling.sendSignal(currentCallRef.current.targetId, 'call-ended');
-    } else if (currentCallRef.current.callerId && signaling) {
-      signaling.sendSignal(currentCallRef.current.callerId, 'call-ended');
+      // Envoyer le signal de fin AVANT de nettoyer
+      if (currentCallRef.current.targetId && signaling) {
+        signaling.sendSignal(currentCallRef.current.targetId, 'call-ended');
+      } else if (currentCallRef.current.callerId && signaling) {
+        signaling.sendSignal(currentCallRef.current.callerId, 'call-ended');
+      }
     }
 
-    // Nettoyer les ressources
+    // Toujours nettoyer les ressources
     cleanupLocalResources();
   }, [signaling, cleanupLocalResources]);
 
