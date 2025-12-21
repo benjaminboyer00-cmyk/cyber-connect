@@ -14,7 +14,7 @@
  * La lecture reste via Supabase Realtime pour des raisons de performance.
  */
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { SERVER_CONFIG, getEndpointUrl, checkServerHealth } from '@/config/server';
 import type { Tables } from '@/integrations/supabase/types';
@@ -30,6 +30,16 @@ export function useMessages(conversationId: string | null, userId: string | unde
   const [messages, setMessages] = useState<MessageWithSender[]>([]);
   const [loading, setLoading] = useState(true);
   const [serverAvailable, setServerAvailable] = useState<boolean | null>(null);
+  
+  // Refs pour éviter les boucles infinies dans les dépendances
+  const conversationIdRef = useRef(conversationId);
+  const userIdRef = useRef(userId);
+  
+  // Mettre à jour les refs quand les valeurs changent
+  useEffect(() => {
+    conversationIdRef.current = conversationId;
+    userIdRef.current = userId;
+  }, [conversationId, userId]);
 
   // Vérifier si le serveur Python est disponible au montage
   useEffect(() => {
@@ -45,8 +55,12 @@ export function useMessages(conversationId: string | null, userId: string | unde
    * Le serveur Python les déchiffre avant de les renvoyer au client.
    * La clé de chiffrement reste côté serveur (sécurité maximale).
    */
+  // fetchMessages stable (pas de deps qui changent) pour éviter boucle infinie
   const fetchMessages = useCallback(async () => {
-    if (!conversationId) {
+    const convId = conversationIdRef.current;
+    const uid = userIdRef.current;
+    
+    if (!convId) {
       setMessages([]);
       setLoading(false);
       return;
@@ -57,7 +71,7 @@ export function useMessages(conversationId: string | null, userId: string | unde
       
       // Appel à l'endpoint de déchiffrement du serveur Python
       const response = await fetch(
-        `${SERVER_CONFIG.BASE_URL}/api/get_messages/${conversationId}`,
+        `${SERVER_CONFIG.BASE_URL}/api/get_messages/${convId}`,
         {
           method: 'GET',
           headers: {
@@ -99,9 +113,9 @@ export function useMessages(conversationId: string | null, userId: string | unde
       setLoading(false);
 
       // Mark messages as read
-      if (userId && messagesData?.length) {
+      if (uid && messagesData?.length) {
         const unreadIds = messagesData
-          .filter(m => !m.is_read && m.sender_id !== userId)
+          .filter(m => !m.is_read && m.sender_id !== uid)
           .map(m => m.id);
 
         if (unreadIds.length) {
@@ -118,7 +132,7 @@ export function useMessages(conversationId: string | null, userId: string | unde
       const { data: messagesData, error: supabaseError } = await supabase
         .from('messages')
         .select('*')
-        .eq('conversation_id', conversationId)
+        .eq('conversation_id', convId)
         .order('created_at', { ascending: true });
 
       if (supabaseError) {
@@ -143,11 +157,12 @@ export function useMessages(conversationId: string | null, userId: string | unde
       setMessages(messagesWithSenders);
       setLoading(false);
     }
-  }, [conversationId, userId]);
+  }, []); // Pas de dépendances - utilise les refs
 
+  // Fetch messages quand conversationId change
   useEffect(() => {
     fetchMessages();
-  }, [fetchMessages]);
+  }, [conversationId, fetchMessages]);
 
   // Real-time subscription (lecture reste via Supabase pour performance)
   useEffect(() => {
@@ -172,7 +187,8 @@ export function useMessages(conversationId: string | null, userId: string | unde
           await fetchMessages();
 
           // Mark as read if not from current user
-          if (userId && newMessage.sender_id !== userId) {
+          const currentUserId = userIdRef.current;
+          if (currentUserId && newMessage.sender_id !== currentUserId) {
             await supabase
               .from('messages')
               .update({ is_read: true })
@@ -185,7 +201,7 @@ export function useMessages(conversationId: string | null, userId: string | unde
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [conversationId, userId, fetchMessages]);
+  }, [conversationId, fetchMessages]);
 
   /**
    * ═══════════════════════════════════════════════════════════════════════════
