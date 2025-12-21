@@ -129,44 +129,76 @@ export const useWebRTC = (
     console.log('🔧 Création PeerConnection vers', targetId);
     
     // Configuration ICE avec STUN + TURN pour traverser tous les types de NAT
+    // IMPORTANT: on utilise ici OpenRelayProject (hébergé par Metered) : gratuit et public
     const pc = new RTCPeerConnection({
       iceServers: [
-        // Serveurs STUN gratuits de Google
+        // STUN (fallback)
         { urls: 'stun:stun.l.google.com:19302' },
         { urls: 'stun:stun1.l.google.com:19302' },
-        
-        // Serveur STUN de Metered
         { urls: 'stun:stun.relay.metered.ca:80' },
-        
-        // Serveurs TURN de Metered.ca (gratuit, tier demo)
-        // Ces credentials sont publics et fournis pour les tests
+
+        // TURN (gratuit) — Open Relay Project
+        // Identifiants publics fournis par le projet
         {
-          urls: 'turn:global.relay.metered.ca:80',
-          username: 'e8dd65b92f3c9bfb9c31c6e1',
-          credential: 'uWdFLz3MgDXBz9ks'
+          urls: 'turn:openrelay.metered.ca:80',
+          username: 'openrelayproject',
+          credential: 'openrelayproject',
         },
         {
-          urls: 'turn:global.relay.metered.ca:80?transport=tcp',
-          username: 'e8dd65b92f3c9bfb9c31c6e1',
-          credential: 'uWdFLz3MgDXBz9ks'
+          urls: 'turn:openrelay.metered.ca:80?transport=tcp',
+          username: 'openrelayproject',
+          credential: 'openrelayproject',
         },
         {
-          urls: 'turn:global.relay.metered.ca:443',
-          username: 'e8dd65b92f3c9bfb9c31c6e1',
-          credential: 'uWdFLz3MgDXBz9ks'
+          urls: 'turn:openrelay.metered.ca:443',
+          username: 'openrelayproject',
+          credential: 'openrelayproject',
         },
         {
-          urls: 'turns:global.relay.metered.ca:443?transport=tcp',
-          username: 'e8dd65b92f3c9bfb9c31c6e1',
-          credential: 'uWdFLz3MgDXBz9ks'
-        }
+          urls: 'turn:openrelay.metered.ca:443?transport=tcp',
+          username: 'openrelayproject',
+          credential: 'openrelayproject',
+        },
+        {
+          urls: 'turns:openrelay.metered.ca:443?transport=tcp',
+          username: 'openrelayproject',
+          credential: 'openrelayproject',
+        },
       ],
-      iceCandidatePoolSize: 10
+      iceCandidatePoolSize: 10,
     });
+
+    // Logs utiles pour diagnostiquer les chutes d'appel
+    pc.onicegatheringstatechange = () => {
+      console.log('🧊 ICE gathering state:', pc.iceGatheringState);
+    };
+
+    
+    pc.onicecandidateerror = (event: any) => {
+      console.error('🧊❌ ICE candidate error:', {
+        errorCode: event?.errorCode,
+        errorText: event?.errorText,
+        url: event?.url,
+        address: event?.address,
+        port: event?.port,
+      });
+    };
+
+    pc.onconnectionstatechange = () => {
+      console.log('🔗 Peer connectionState:', pc.connectionState);
+      if (pc.connectionState === 'failed') {
+        console.log('🔗❌ connectionState failed - nettoyage local');
+        cleanupLocalResources();
+      }
+      if (pc.connectionState === 'closed') {
+        console.log('🔗🛑 connectionState closed - nettoyage local');
+        cleanupLocalResources();
+      }
+    };
 
     pc.onicecandidate = (event) => {
       if (event.candidate && signaling) {
-        console.log('📤 Envoi ICE candidate');
+        console.log('📤 Envoi ICE candidate', event.candidate.type);
         signaling.sendSignal(targetId, 'ice-candidate', event.candidate.toJSON());
       }
     };
@@ -180,7 +212,7 @@ export const useWebRTC = (
 
     pc.oniceconnectionstatechange = () => {
       console.log('🌐 ICE state:', pc.iceConnectionState);
-      
+
       // Annuler tout timeout précédent
       if (disconnectTimeoutRef.current) {
         clearTimeout(disconnectTimeoutRef.current);
@@ -189,18 +221,29 @@ export const useWebRTC = (
 
       if (['connected', 'completed'].includes(pc.iceConnectionState)) {
         setCallState('connected');
-      } else if (pc.iceConnectionState === 'disconnected') {
-        // 'disconnected' est souvent transitoire - attendre 5s avant de couper
-        console.log('⏳ ICE disconnected - attente 5s avant timeout...');
-        disconnectTimeoutRef.current = setTimeout(() => {
-          if (peerConnectionRef.current?.iceConnectionState === 'disconnected') {
-            console.log('⏰ Timeout ICE - nettoyage local (pas de signal)');
-            cleanupLocalResources(); // PAS endCall() - pas d'action utilisateur
-          }
-        }, 5000);
-      } else if (pc.iceConnectionState === 'failed') {
-        // 'failed' est fatal - nettoyage sans signal (ce n'est pas une action utilisateur)
+        return;
+      }
+
+      if (pc.iceConnectionState === 'disconnected') {
+        // IMPORTANT: ne plus auto-terminer l'appel sur disconnected.
+        // On tente plutôt un restart ICE, et on laisse l'utilisateur raccrocher si besoin.
+        console.log('⚠️ ICE disconnected - tentative restartIce (pas de cleanup auto)');
+        try {
+          pc.restartIce();
+        } catch (e) {
+          console.log('⚠️ restartIce indisponible/échoué:', e);
+        }
+        return;
+      }
+
+      if (pc.iceConnectionState === 'failed') {
         console.log('❌ ICE failed - nettoyage local');
+        cleanupLocalResources();
+        return;
+      }
+
+      if (pc.iceConnectionState === 'closed') {
+        console.log('🛑 ICE closed - nettoyage local');
         cleanupLocalResources();
       }
     };
