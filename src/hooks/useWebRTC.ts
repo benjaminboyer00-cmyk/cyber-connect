@@ -35,6 +35,9 @@ export const useWebRTC = (
     callerId: string | null;
   }>({ targetId: null, callerId: null });
 
+  // Timeout pour ICE disconnected (évite les faux positifs)
+  const disconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
   // 1. Accès caméra/micro
   const initializeLocalStream = useCallback(async (): Promise<boolean> => {
     try {
@@ -54,9 +57,21 @@ export const useWebRTC = (
     }
   }, []);
 
-  // 2. Fin d'appel
+  // 2. Fin d'appel (avec protection contre appels multiples)
   const endCall = useCallback(() => {
+    // Éviter les appels multiples si déjà idle
+    if (callState === 'idle') {
+      console.log('⚠️ Déjà en idle, ignore endCall');
+      return;
+    }
+
     console.log('🛑 Fin d\'appel');
+
+    // Annuler le timeout de déconnexion si actif
+    if (disconnectTimeoutRef.current) {
+      clearTimeout(disconnectTimeoutRef.current);
+      disconnectTimeoutRef.current = null;
+    }
 
     if (currentCallRef.current.targetId && signaling) {
       signaling.sendSignal(currentCallRef.current.targetId, 'call-ended');
@@ -79,7 +94,7 @@ export const useWebRTC = (
     currentCallRef.current = { targetId: null, callerId: null };
     isRemoteDescriptionSet.current = false;
     pendingCandidatesQueue.current = [];
-  }, [signaling]);
+  }, [signaling, callState]);
 
   // 3. Création PeerConnection
   const createPeerConnection = useCallback((targetId: string) => {
@@ -109,11 +124,30 @@ export const useWebRTC = (
 
     pc.oniceconnectionstatechange = () => {
       console.log('🌐 ICE state:', pc.iceConnectionState);
+      
+      // Annuler tout timeout précédent
+      if (disconnectTimeoutRef.current) {
+        clearTimeout(disconnectTimeoutRef.current);
+        disconnectTimeoutRef.current = null;
+      }
+
       if (['connected', 'completed'].includes(pc.iceConnectionState)) {
         setCallState('connected');
-      } else if (['disconnected', 'failed', 'closed'].includes(pc.iceConnectionState)) {
+      } else if (pc.iceConnectionState === 'disconnected') {
+        // 'disconnected' est souvent transitoire - attendre 3s avant de couper
+        console.log('⏳ ICE disconnected - attente 3s avant timeout...');
+        disconnectTimeoutRef.current = setTimeout(() => {
+          if (peerConnectionRef.current?.iceConnectionState === 'disconnected') {
+            console.log('⏰ Timeout ICE - fin d\'appel');
+            endCall();
+          }
+        }, 3000);
+      } else if (pc.iceConnectionState === 'failed') {
+        // 'failed' est fatal - fin immédiate
+        console.log('❌ ICE failed - fin d\'appel');
         endCall();
       }
+      // 'closed' n'appelle plus endCall() car c'est nous qui fermons
     };
 
     return pc;
@@ -296,14 +330,22 @@ export const useWebRTC = (
     endCall();
   }, [callState, signaling, endCall]);
 
-  // Cleanup
+  // Cleanup - SEULEMENT ressources locales, PAS de signaling
   useEffect(() => {
     return () => {
+      // Annuler le timeout
+      if (disconnectTimeoutRef.current) {
+        clearTimeout(disconnectTimeoutRef.current);
+      }
+      // Fermer la connexion sans envoyer de signal
       if (peerConnectionRef.current) {
         peerConnectionRef.current.close();
+        peerConnectionRef.current = null;
       }
+      // Arrêter les tracks média
       if (localStreamRef.current) {
         localStreamRef.current.getTracks().forEach(track => track.stop());
+        localStreamRef.current = null;
       }
     };
   }, []);
