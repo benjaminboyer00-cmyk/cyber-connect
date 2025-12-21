@@ -49,8 +49,11 @@ export const useWebRTC = (
     callerId: string | null;
   }>({ targetId: null, callerId: null });
 
-  // Timeout pour ICE disconnected
+  // Timeout pour ICE disconnected/failed
   const disconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  // FIX: Ref synchrone pour savoir si on est l'appelant (évite race condition sur callState)
+  const isCallerRef = useRef<boolean>(false);
 
   // 1. Accès caméra/micro
   const initializeLocalStream = useCallback(async (): Promise<boolean> => {
@@ -106,6 +109,7 @@ export const useWebRTC = (
     currentCallRef.current = { targetId: null, callerId: null };
     isRemoteDescriptionSet.current = false;
     pendingCandidatesQueue.current = [];
+    isCallerRef.current = false; // FIX: Reset de la ref synchrone
   }, []); // PAS de dépendances = fonction stable
 
   /**
@@ -136,16 +140,25 @@ export const useWebRTC = (
   const createPeerConnection = useCallback((targetId: string) => {
     console.log('🔧 Création PeerConnection vers', targetId);
     
-    // Configuration ICE minimale (évite un gathering interminable)
-    // - 1 STUN Google
-    // - 1 TURN OpenRelay (Metered)
+    // Configuration ICE Metered.ca officielle
     const pc = new RTCPeerConnection({
       iceServers: [
-        { urls: 'stun:stun.l.google.com:19302' },
+        { urls: "stun:stun.l.google.com:19302" },
+        { urls: "stun:stun.relay.metered.ca:80" },
         {
-          urls: 'turn:openrelay.metered.ca:443?transport=tcp',
-          username: 'openrelayproject',
-          credential: 'openrelayproject',
+          urls: "turn:standard.relay.metered.ca:80",
+          username: "2ce8447dffad525621446d76",
+          credential: "vQ4YEJGIKoc9MmTx",
+        },
+        {
+          urls: "turn:standard.relay.metered.ca:443",
+          username: "2ce8447dffad525621446d76",
+          credential: "vQ4YEJGIKoc9MmTx",
+        },
+        {
+          urls: "turns:standard.relay.metered.ca:443?transport=tcp",
+          username: "2ce8447dffad525621446d76",
+          credential: "vQ4YEJGIKoc9MmTx",
         },
       ],
     });
@@ -214,8 +227,13 @@ export const useWebRTC = (
       }
 
       if (pc.iceConnectionState === 'failed') {
-        console.log('❌ ICE failed - nettoyage local');
-        cleanupLocalResources();
+        console.log('⚠️ ICE failed - attente 3s avant cleanup...');
+        disconnectTimeoutRef.current = setTimeout(() => {
+          if (peerConnectionRef.current?.iceConnectionState === 'failed') {
+            console.log('❌ ICE toujours failed après 3s - nettoyage');
+            cleanupLocalResources();
+          }
+        }, 3000);
         return;
       }
 
@@ -298,8 +316,9 @@ export const useWebRTC = (
           break;
 
         case 'answer':
-          if (callState !== 'calling' || !peerConnectionRef.current) {
-            console.log('⚠️ Pas en appel sortant');
+          // FIX: Utiliser isCallerRef au lieu de callState (évite race condition)
+          if (!isCallerRef.current || !peerConnectionRef.current) {
+            console.log('⚠️ Pas en appel sortant (isCallerRef:', isCallerRef.current, ')');
             return;
           }
 
@@ -355,6 +374,7 @@ export const useWebRTC = (
       console.log('📞 Appel vers', targetId);
       setCallState('calling');
       setIsCaller(true);
+      isCallerRef.current = true; // FIX: Mise à jour synchrone
       currentCallRef.current = { targetId, callerId: currentUserId };
 
       await initializeLocalStream();
