@@ -1,8 +1,8 @@
-import { useRef, useEffect } from 'react';
-import { PhoneOff, Mic, MicOff, Video, VideoOff } from 'lucide-react';
+import { useRef, useEffect, useState } from 'react';
+import { PhoneOff, Mic, MicOff, Video, VideoOff, Clock } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { useState } from 'react';
+import { Badge } from '@/components/ui/badge';
 
 interface CallInterfaceProps {
   isOpen: boolean;
@@ -13,6 +13,18 @@ interface CallInterfaceProps {
   remoteAvatar?: string;
   onEndCall: () => void;
 }
+
+// Formater la durée en MM:SS ou HH:MM:SS
+const formatDuration = (seconds: number): string => {
+  const hrs = Math.floor(seconds / 3600);
+  const mins = Math.floor((seconds % 3600) / 60);
+  const secs = seconds % 60;
+  
+  if (hrs > 0) {
+    return `${hrs.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  }
+  return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+};
 
 export function CallInterface({
   isOpen,
@@ -27,6 +39,37 @@ export function CallInterface({
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
   const [isMuted, setIsMuted] = useState(false);
   const [isVideoOff, setIsVideoOff] = useState(false);
+  const [callDuration, setCallDuration] = useState(0);
+  const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const startTimeRef = useRef<number | null>(null);
+
+  // Démarrer le chrono quand l'interface s'ouvre
+  useEffect(() => {
+    if (isOpen) {
+      startTimeRef.current = Date.now();
+      setCallDuration(0);
+      
+      timerRef.current = setInterval(() => {
+        if (startTimeRef.current) {
+          const elapsed = Math.floor((Date.now() - startTimeRef.current) / 1000);
+          setCallDuration(elapsed);
+        }
+      }, 1000);
+    } else {
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+        timerRef.current = null;
+      }
+      startTimeRef.current = null;
+      setCallDuration(0);
+    }
+    
+    return () => {
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+      }
+    };
+  }, [isOpen]);
 
   // Attacher les streams aux éléments vidéo
   useEffect(() => {
@@ -65,6 +108,16 @@ export function CallInterface({
 
   return (
     <div className="fixed inset-0 z-50 bg-background/95 backdrop-blur-sm flex flex-col">
+      {/* Header avec chrono */}
+      <div className="absolute top-4 left-0 right-0 z-10 flex justify-center">
+        <Badge variant="secondary" className="px-4 py-2 text-lg font-mono flex items-center gap-2">
+          <Clock className="w-4 h-4 text-green-500" />
+          <span className={remoteStream ? 'text-green-500' : 'text-muted-foreground'}>
+            {formatDuration(callDuration)}
+          </span>
+        </Badge>
+      </div>
+
       {/* Zone vidéo principale */}
       <div className="flex-1 relative flex items-center justify-center">
         {callType === 'video' && remoteStream ? (
