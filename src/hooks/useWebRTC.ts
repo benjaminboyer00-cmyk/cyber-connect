@@ -128,12 +128,40 @@ export const useWebRTC = (
   const createPeerConnection = useCallback((targetId: string) => {
     console.log('🔧 Création PeerConnection vers', targetId);
     
+    // Configuration ICE avec STUN + TURN pour traverser tous les types de NAT
     const pc = new RTCPeerConnection({
       iceServers: [
+        // Serveurs STUN gratuits de Google
         { urls: 'stun:stun.l.google.com:19302' },
         { urls: 'stun:stun1.l.google.com:19302' },
-        { urls: 'stun:stun2.l.google.com:19302' }
-      ]
+        
+        // Serveur STUN de Metered
+        { urls: 'stun:stun.relay.metered.ca:80' },
+        
+        // Serveurs TURN de Metered.ca (gratuit, tier demo)
+        // Ces credentials sont publics et fournis pour les tests
+        {
+          urls: 'turn:global.relay.metered.ca:80',
+          username: 'e8dd65b92f3c9bfb9c31c6e1',
+          credential: 'uWdFLz3MgDXBz9ks'
+        },
+        {
+          urls: 'turn:global.relay.metered.ca:80?transport=tcp',
+          username: 'e8dd65b92f3c9bfb9c31c6e1',
+          credential: 'uWdFLz3MgDXBz9ks'
+        },
+        {
+          urls: 'turn:global.relay.metered.ca:443',
+          username: 'e8dd65b92f3c9bfb9c31c6e1',
+          credential: 'uWdFLz3MgDXBz9ks'
+        },
+        {
+          urls: 'turns:global.relay.metered.ca:443?transport=tcp',
+          username: 'e8dd65b92f3c9bfb9c31c6e1',
+          credential: 'uWdFLz3MgDXBz9ks'
+        }
+      ],
+      iceCandidatePoolSize: 10
     });
 
     pc.onicecandidate = (event) => {
