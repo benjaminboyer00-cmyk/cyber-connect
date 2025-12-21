@@ -6,7 +6,10 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { useChunkUpload } from '@/hooks/useChunkUpload';
 import { useVoiceRecorder } from '@/hooks/useVoiceRecorder';
+import { useWebRTC } from '@/hooks/useWebRTC';
 import { MessageBubble } from './MessageBubble';
+import { IncomingCallModal } from './IncomingCallModal';
+import { CallInterface } from './CallInterface';
 import { toast } from 'sonner';
 import type { Tables } from '@/integrations/supabase/types';
 import type { MessageWithSender } from '@/hooks/useMessages';
@@ -43,6 +46,19 @@ export function ChatArea({ contact, messages, currentUserId, onSendMessage, load
     formatDuration 
   } = useVoiceRecorder();
 
+  // WebRTC pour appels audio/vidéo
+  const {
+    callState,
+    callType,
+    localStream,
+    remoteStream,
+    incomingCall,
+    startCall,
+    acceptCall,
+    rejectCall,
+    endCall,
+  } = useWebRTC(currentUserId);
+
   // Auto-scroll vers le dernier message
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -51,6 +67,35 @@ export function ChatArea({ contact, messages, currentUserId, onSendMessage, load
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
+
+  // Handlers pour les appels
+  const handleStartAudioCall = () => {
+    if (contact?.id) {
+      startCall(contact.id, 'audio');
+      toast.info(`Appel audio vers ${contact.username || 'utilisateur'}...`);
+    }
+  };
+
+  const handleStartVideoCall = () => {
+    if (contact?.id) {
+      startCall(contact.id, 'video');
+      toast.info(`Appel vidéo vers ${contact.username || 'utilisateur'}...`);
+    }
+  };
+
+  const handleAcceptCall = () => {
+    acceptCall();
+  };
+
+  const handleRejectCall = () => {
+    rejectCall();
+    toast.info('Appel refusé');
+  };
+
+  const handleEndCall = () => {
+    endCall();
+    toast.info('Appel terminé');
+  };
 
   const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -189,17 +234,56 @@ export function ChatArea({ contact, messages, currentUserId, onSendMessage, load
         </div>
         
         <div className="flex items-center gap-2">
-          <Button variant="ghost" size="icon" className="text-muted-foreground hover:text-foreground">
-            <Phone className="w-5 h-5" />
-          </Button>
-          <Button variant="ghost" size="icon" className="text-muted-foreground hover:text-foreground">
-            <Video className="w-5 h-5" />
-          </Button>
+          {/* Boutons d'appel - seulement pour les chats 1-1, pas les groupes */}
+          {!isGroup && contact && (
+            <>
+              <Button 
+                variant="ghost" 
+                size="icon" 
+                className="text-muted-foreground hover:text-foreground hover:bg-green-500/10"
+                onClick={handleStartAudioCall}
+                disabled={callState !== 'idle'}
+                title="Appel audio"
+              >
+                <Phone className="w-5 h-5" />
+              </Button>
+              <Button 
+                variant="ghost" 
+                size="icon" 
+                className="text-muted-foreground hover:text-foreground hover:bg-blue-500/10"
+                onClick={handleStartVideoCall}
+                disabled={callState !== 'idle'}
+                title="Appel vidéo"
+              >
+                <Video className="w-5 h-5" />
+              </Button>
+            </>
+          )}
           <Button variant="ghost" size="icon" className="text-muted-foreground hover:text-foreground">
             <MoreVertical className="w-5 h-5" />
           </Button>
         </div>
       </div>
+
+      {/* Modal appel entrant */}
+      <IncomingCallModal
+        isOpen={callState === 'receiving' && !!incomingCall}
+        callerName={incomingCall?.from || 'Utilisateur'}
+        callType={incomingCall?.callType || 'audio'}
+        onAccept={handleAcceptCall}
+        onReject={handleRejectCall}
+      />
+
+      {/* Interface d'appel en cours */}
+      <CallInterface
+        isOpen={callState === 'calling' || callState === 'connected'}
+        callType={callType}
+        localStream={localStream}
+        remoteStream={remoteStream}
+        remoteName={contact?.username || 'Utilisateur'}
+        remoteAvatar={contact?.avatar_url || undefined}
+        onEndCall={handleEndCall}
+      />
 
       {/* Messages */}
       <ScrollArea className="flex-1 p-6 scrollbar-thin">

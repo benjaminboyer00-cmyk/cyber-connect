@@ -31,9 +31,11 @@ export function useMessages(conversationId: string | null, userId: string | unde
   const [loading, setLoading] = useState(true);
   const [serverAvailable, setServerAvailable] = useState<boolean | null>(null);
   
-  // Refs pour éviter les boucles infinies dans les dépendances
+  // Refs pour éviter les boucles infinies
   const conversationIdRef = useRef(conversationId);
   const userIdRef = useRef(userId);
+  const isFetchingRef = useRef(false); // Empêche les appels concurrents
+  const lastFetchTimeRef = useRef(0); // Debounce
   
   // Mettre à jour les refs quand les valeurs changent
   useEffect(() => {
@@ -55,7 +57,7 @@ export function useMessages(conversationId: string | null, userId: string | unde
    * Le serveur Python les déchiffre avant de les renvoyer au client.
    * La clé de chiffrement reste côté serveur (sécurité maximale).
    */
-  // fetchMessages stable (pas de deps qui changent) pour éviter boucle infinie
+  // fetchMessages avec debounce et protection contre appels concurrents
   const fetchMessages = useCallback(async () => {
     const convId = conversationIdRef.current;
     const uid = userIdRef.current;
@@ -65,6 +67,16 @@ export function useMessages(conversationId: string | null, userId: string | unde
       setLoading(false);
       return;
     }
+
+    // Protection: éviter les appels concurrents et debounce de 500ms
+    const now = Date.now();
+    if (isFetchingRef.current || (now - lastFetchTimeRef.current < 500)) {
+      console.log('[fetchMessages] ⏳ Appel ignoré (debounce ou fetch en cours)');
+      return;
+    }
+    
+    isFetchingRef.current = true;
+    lastFetchTimeRef.current = now;
 
     try {
       console.log('[fetchMessages] 📥 Récupération via serveur Python (déchiffrement)...');
@@ -128,7 +140,10 @@ export function useMessages(conversationId: string | null, userId: string | unde
             .in('id', unreadIds);
         }
       }
+      
+      isFetchingRef.current = false;
     } catch (error) {
+      isFetchingRef.current = false;
       console.error('[fetchMessages] ❌ Erreur, fallback Supabase direct:', error);
       
       // Fallback: lecture directe depuis Supabase (messages resteront chiffrés)
