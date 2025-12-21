@@ -1,6 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
-import { SERVER_CONFIG } from '@/config/server';
 import type { Tables } from '@/integrations/supabase/types';
 
 type Conversation = Tables<'conversations'>;
@@ -62,40 +61,21 @@ export function useConversations(userId: string | undefined) {
           .map(m => profileMap.get(m.user_id))
           .filter((p): p is Profile => p !== undefined && p.id !== userId) || [];
 
-        // Get last message - via Python server for decryption
+        // Get last message - Supabase only (évite de relancer /api/get_messages en boucle)
         let lastMsg: Message | null = null;
-        try {
-          const response = await fetch(
-            `${SERVER_CONFIG.BASE_URL}/api/get_messages/${conv.id}`,
-            {
-              method: 'GET',
-              headers: { 'Content-Type': 'application/json' },
-              signal: AbortSignal.timeout(5000),
-            }
-          );
-          if (response.ok) {
-            const data = await response.json();
-            const messages = Array.isArray(data) ? data : (data.messages || []);
-            lastMsg = messages.length > 0 ? messages[messages.length - 1] : null;
-            console.log('[useConversations] ✅ Dernier message déchiffré pour', conv.id);
-          }
-        } catch (error) {
-          console.warn('[useConversations] ⚠️ Fallback Supabase pour last message:', error);
-          // Fallback: show "(Message chiffré)" instead of encrypted text
-          const { data: encryptedMsg } = await supabase
-            .from('messages')
-            .select('*')
-            .eq('conversation_id', conv.id)
-            .order('created_at', { ascending: false })
-            .limit(1)
-            .maybeSingle();
-          
-          if (encryptedMsg) {
-            lastMsg = {
-              ...encryptedMsg,
-              content: encryptedMsg.content?.startsWith('gAAAAA') ? '(Message chiffré)' : encryptedMsg.content
-            };
-          }
+        const { data: encryptedMsg } = await supabase
+          .from('messages')
+          .select('*')
+          .eq('conversation_id', conv.id)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (encryptedMsg) {
+          lastMsg = {
+            ...encryptedMsg,
+            content: encryptedMsg.content?.startsWith('gAAAAA') ? '(Message chiffré)' : encryptedMsg.content
+          };
         }
 
         // Get unread count
