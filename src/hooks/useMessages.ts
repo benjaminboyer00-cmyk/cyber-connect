@@ -108,8 +108,11 @@ export function useMessages(conversationId: string | null, userId: string | unde
         sender: m.sender_id ? profileMap.get(m.sender_id) || null : null
       }));
 
-      console.log('[fetchMessages] 🔄 Mise à jour du state avec', messagesWithSenders.length, 'messages');
-      setMessages(messagesWithSenders);
+      // Déduplication par id (évite les ré-affichages si le serveur renvoie des doublons)
+      const uniqueMessages = Array.from(new Map(messagesWithSenders.map(m => [m.id, m])).values());
+
+      console.log('[fetchMessages] 🔄 Mise à jour du state avec', uniqueMessages.length, 'messages');
+      setMessages(uniqueMessages);
       setLoading(false);
 
       // Mark messages as read
