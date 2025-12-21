@@ -223,7 +223,7 @@ export function useSignaling(userId: string | undefined) {
     setIncomingCall(null);
   }, [sendSignal]);
 
-  // EFFET PRINCIPAL: Connexion uniquement si userId CHANGE
+  // EFFET PRINCIPAL: Connexion/déconnexion basée sur userId
   useEffect(() => {
     // Si userId a changé ET est valide
     if (userId && userId !== userIdRef.current) {
@@ -246,20 +246,13 @@ export function useSignaling(userId: string | undefined) {
       disconnect();
     }
     
-    // Cleanup au démontage
+    // Cleanup au démontage du composant
     return () => {
-      // Ne déconnecter que si le composant est vraiment démonté
-      // (pas juste un re-render)
-    };
-  }, [userId, connect, disconnect]);
-
-  // Cleanup final au démontage du composant
-  useEffect(() => {
-    return () => {
+      console.log('[Signaling] 🧹 Cleanup useEffect');
       userIdRef.current = undefined;
       disconnect();
     };
-  }, [disconnect]);
+  }, [userId, connect, disconnect]);
 
   return {
     isConnected,
