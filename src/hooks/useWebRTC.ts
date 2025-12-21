@@ -361,12 +361,25 @@ export const useWebRTC = (
     cleanupLocalResources();
   }, [callState, signaling, cleanupLocalResources]);
 
-  // Cleanup au démontage - SEULEMENT ressources locales, PAS de signaling
+  // Cleanup au démontage - DIRECT sans dépendance (évite cleanup intempestif sur HMR)
   useEffect(() => {
     return () => {
-      cleanupLocalResources();
+      console.log('🧹 useWebRTC unmount cleanup');
+      // Cleanup DIRECT (pas via cleanupLocalResources pour éviter problèmes de dépendances)
+      if (disconnectTimeoutRef.current) {
+        clearTimeout(disconnectTimeoutRef.current);
+        disconnectTimeoutRef.current = null;
+      }
+      if (peerConnectionRef.current) {
+        peerConnectionRef.current.close();
+        peerConnectionRef.current = null;
+      }
+      if (localStreamRef.current) {
+        localStreamRef.current.getTracks().forEach(track => track.stop());
+        localStreamRef.current = null;
+      }
     };
-  }, [cleanupLocalResources]);
+  }, []); // IMPORTANT: [] = seulement au vrai démontage, pas sur re-render
 
   return {
     localStream,
