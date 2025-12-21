@@ -5,6 +5,7 @@ import { useProfile } from '@/hooks/useProfile';
 import { useFriends } from '@/hooks/useFriends';
 import { useConversations } from '@/hooks/useConversations';
 import { useMessages } from '@/hooks/useMessages';
+import { useSignaling } from '@/hooks/useSignaling';
 import { useWebRTC } from '@/hooks/useWebRTC';
 import { Sidebar } from '@/components/chat/Sidebar';
 import { ChatArea } from '@/components/chat/ChatArea';
@@ -23,19 +24,21 @@ export default function Index() {
   const { friends, pendingRequests, searchUsers, sendFriendRequest, acceptFriendRequest, rejectFriendRequest } = useFriends(user?.id);
   const { conversations, createConversation, createGroupConversation, deleteConversation, refetch: refetchConversations } = useConversations(user?.id);
   
-  // WebRTC au niveau global pour recevoir les appels même sans conversation ouverte
+  // Signaling WebSocket
+  const signaling = useSignaling(user?.id);
+  
+  // WebRTC avec signaling passé en paramètre
   const {
     callState,
-    callType,
     localStream,
     remoteStream,
-    incomingCall,
-    signalingConnected,
-    startCall,
+    isCaller,
+    currentCall,
+    callUser,
     acceptCall,
     rejectCall,
     endCall,
-  } = useWebRTC(user?.id);
+  } = useWebRTC(user?.id || null, signaling);
 
   const [selectedConversation, setSelectedConversation] = useState<string | null>(null);
   const [searchModalOpen, setSearchModalOpen] = useState(false);
@@ -51,9 +54,8 @@ export default function Index() {
   
   // Trouver le profil de l'appelant pour afficher son nom
   const getCallerProfile = () => {
-    if (!incomingCall) return null;
-    // Chercher dans les amis
-    const friend = friends.find(f => f.profile?.id === incomingCall.from);
+    if (callState !== 'ringing' || !currentCall.callerId) return null;
+    const friend = friends.find(f => f.profile?.id === currentCall.callerId);
     return friend?.profile || null;
   };
   
@@ -61,10 +63,12 @@ export default function Index() {
   
   // Trouver le profil du destinataire actuel de l'appel
   const getRemoteProfile = () => {
-    // Si on est en appel avec quelqu'un, trouver son profil
     if (callState === 'calling' || callState === 'connected') {
-      // Le contact de la conversation actuelle ou l'appelant
-      return contact || callerProfile;
+      if (isCaller && currentCall.targetId) {
+        const friend = friends.find(f => f.profile?.id === currentCall.targetId);
+        return friend?.profile || contact;
+      }
+      return callerProfile || contact;
     }
     return callerProfile;
   };
@@ -141,6 +145,11 @@ export default function Index() {
   if (!user) return null;
 
   // Handlers pour les appels
+  const handleStartCall = (targetUserId: string, _type: 'audio' | 'video') => {
+    callUser(targetUserId);
+    toast.info('Appel en cours...');
+  };
+
   const handleAcceptCall = () => {
     acceptCall();
     toast.success('Appel accepté');
@@ -181,26 +190,25 @@ export default function Index() {
         isGroup={selectedConv?.is_group || false}
         groupName={selectedConv?.name || ''}
         members={selectedConv?.members || []}
-        // Props WebRTC passées depuis Index
         callState={callState}
-        signalingConnected={signalingConnected}
-        onStartCall={startCall}
+        signalingConnected={signaling.isConnected}
+        onStartCall={handleStartCall}
       />
 
-      {/* Modal appel entrant - au niveau global */}
+      {/* Modal appel entrant */}
       <IncomingCallModal
-        isOpen={callState === 'receiving' && !!incomingCall}
-        callerName={callerProfile?.username || incomingCall?.from || 'Utilisateur'}
+        isOpen={callState === 'ringing' && !!currentCall.callerId}
+        callerName={callerProfile?.username || currentCall.callerId || 'Utilisateur'}
         callerAvatar={callerProfile?.avatar_url || undefined}
-        callType={incomingCall?.callType || 'audio'}
+        callType="video"
         onAccept={handleAcceptCall}
         onReject={handleRejectCall}
       />
 
-      {/* Interface d'appel en cours - au niveau global */}
+      {/* Interface d'appel en cours */}
       <CallInterface
         isOpen={callState === 'calling' || callState === 'connected'}
-        callType={callType}
+        callType="video"
         localStream={localStream}
         remoteStream={remoteStream}
         remoteName={remoteProfile?.username || 'Utilisateur'}
