@@ -1,17 +1,23 @@
 /**
  * Hook WebSocket pour le signaling WebRTC (appels audio/vidéo)
- * 
- * CORRECTIFS APPLIQUÉS:
- * - isConnectingRef pour empêcher les connexions multiples
- * - userIdRef pour ne reconnecter QUE si userId change
- * - Heartbeat ping/pong toutes les 25 secondes (requis par Hugging Face)
- * - userId retiré des dépendances de connect()
+ *
+ * Objectif (stabilité):
+ * - Conserver UN SEUL WebSocket actif pendant toute la session utilisateur (singleton hors hook)
+ * - Éviter les boucles de fermeture/reconnexion (Code 1000) causées par un cleanup React (StrictMode/HMR)
+ * - Réduire le bruit console (pas de spam ping/pong / ice-candidate)
  */
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { SERVER_CONFIG } from '@/config/server';
 
-export type SignalType = 'offer' | 'answer' | 'ice-candidate' | 'call-request' | 'call-accepted' | 'call-rejected' | 'call-ended';
+export type SignalType =
+  | 'offer'
+  | 'answer'
+  | 'ice-candidate'
+  | 'call-request'
+  | 'call-accepted'
+  | 'call-rejected'
+  | 'call-ended';
 
 export interface SignalMessage {
   type: SignalType | 'pong';
@@ -20,196 +26,296 @@ export interface SignalMessage {
   payload?: RTCSessionDescriptionInit | RTCIceCandidateInit | { callType?: 'audio' | 'video' };
 }
 
+type ConnectionListener = (connected: boolean) => void;
+
+type SharedSignalingSocket = {
+  userId: string;
+  ws: WebSocket | null;
+  isConnecting: boolean;
+  manualClose: boolean;
+  reconnectTimeout: ReturnType<typeof setTimeout> | null;
+  pingInterval: ReturnType<typeof setInterval> | null;
+  messageListeners: Set<(msg: SignalMessage) => void>;
+  connectionListeners: Set<ConnectionListener>;
+};
+
+// Singleton global: persiste même si les composants montent/démontent.
+let sharedSocket: SharedSignalingSocket | null = null;
+
+const buildWsUrl = (uid: string) => {
+  const wsBase = SERVER_CONFIG.BASE_URL.replace('https', 'wss').replace('http', 'ws');
+  return `${wsBase}/ws/${uid}`;
+};
+
+const shouldLogSignal = (type: SignalMessage['type']) =>
+  type === 'call-request' ||
+  type === 'call-accepted' ||
+  type === 'call-rejected' ||
+  type === 'call-ended';
+
+const notifyConnection = (connected: boolean) => {
+  if (!sharedSocket) return;
+  for (const cb of sharedSocket.connectionListeners) {
+    try {
+      cb(connected);
+    } catch {
+      // ignore
+    }
+  }
+};
+
+const broadcastMessage = (msg: SignalMessage) => {
+  if (!sharedSocket) return;
+  for (const cb of sharedSocket.messageListeners) {
+    try {
+      cb(msg);
+    } catch (e) {
+      console.error('[Signaling] listener error:', e);
+    }
+  }
+};
+
+const clearSharedTimers = () => {
+  if (!sharedSocket) return;
+
+  if (sharedSocket.reconnectTimeout) {
+    clearTimeout(sharedSocket.reconnectTimeout);
+    sharedSocket.reconnectTimeout = null;
+  }
+
+  if (sharedSocket.pingInterval) {
+    clearInterval(sharedSocket.pingInterval);
+    sharedSocket.pingInterval = null;
+  }
+};
+
+const connectSharedSocket = (uid: string) => {
+  // Créer l'objet singleton si besoin
+  if (!sharedSocket) {
+    sharedSocket = {
+      userId: uid,
+      ws: null,
+      isConnecting: false,
+      manualClose: false,
+      reconnectTimeout: null,
+      pingInterval: null,
+      messageListeners: new Set(),
+      connectionListeners: new Set(),
+    };
+  }
+
+  // Réinitialiser pour ce user
+  sharedSocket.userId = uid;
+  sharedSocket.manualClose = false;
+
+  const current = sharedSocket;
+
+  // Protection multi-connexion
+  if (current.isConnecting) return;
+  if (current.ws?.readyState === WebSocket.OPEN || current.ws?.readyState === WebSocket.CONNECTING) return;
+
+  clearSharedTimers();
+
+  current.isConnecting = true;
+  const url = buildWsUrl(uid);
+
+  try {
+    const ws = new WebSocket(url);
+    current.ws = ws;
+
+    ws.onopen = () => {
+      if (!sharedSocket) return;
+      sharedSocket.isConnecting = false;
+      notifyConnection(true);
+
+      // Heartbeat (HF): ping toutes les 25s (sans spam console)
+      clearSharedTimers();
+      sharedSocket.pingInterval = setInterval(() => {
+        const s = sharedSocket;
+        if (!s?.ws || s.ws.readyState !== WebSocket.OPEN) return;
+        s.ws.send(JSON.stringify({ type: 'ping' }));
+      }, 25000);
+    };
+
+    ws.onclose = (e) => {
+      const s = sharedSocket;
+      if (!s) return;
+
+      s.isConnecting = false;
+      s.ws = null;
+      notifyConnection(false);
+
+      clearSharedTimers();
+
+      // Pas de reconnexion si c'est nous qui avons fermé
+      if (s.manualClose) return;
+
+      // Reconnexion douce si on a au moins un listener actif
+      if (s.messageListeners.size === 0 && s.connectionListeners.size === 0) return;
+
+      // Éviter un spam de reconnexion si le serveur ferme "normalement" en boucle
+      // (on espace un peu et on ne log pas à chaque fois)
+      s.reconnectTimeout = setTimeout(() => {
+        // Toujours le même userId
+        if (!sharedSocket || sharedSocket.userId !== uid) return;
+        connectSharedSocket(uid);
+      }, 3000);
+
+      if (e.code !== 1000) {
+        console.warn('[Signaling] socket closed:', e.code, e.reason);
+      }
+    };
+
+    ws.onerror = (err) => {
+      const s = sharedSocket;
+      if (s) s.isConnecting = false;
+      console.error('[Signaling] WebSocket error:', err);
+    };
+
+    ws.onmessage = (event) => {
+      try {
+        const data: SignalMessage = JSON.parse(event.data);
+
+        if (data.type === 'pong') return;
+
+        if (shouldLogSignal(data.type)) {
+          console.log('[Signaling] 📨', data.type, 'de', data.sender_id);
+        }
+
+        broadcastMessage(data);
+      } catch (err) {
+        console.error('[Signaling] parse error:', err);
+      }
+    };
+
+    // sync état au cas où
+    if (ws.readyState === WebSocket.OPEN) {
+      current.isConnecting = false;
+      notifyConnection(true);
+    }
+  } catch (err) {
+    current.isConnecting = false;
+    console.error('[Signaling] WebSocket creation error:', err);
+  }
+};
+
+const ensureSharedSocket = (uid: string) => {
+  // Si on change d'utilisateur, on ferme l'ancien singleton
+  if (sharedSocket && sharedSocket.userId !== uid) {
+    // fermeture volontaire (pas de reconnexion)
+    sharedSocket.manualClose = true;
+    clearSharedTimers();
+    try {
+      sharedSocket.ws?.close(1000, 'user_changed');
+    } catch {
+      // ignore
+    }
+    sharedSocket = null;
+  }
+
+  connectSharedSocket(uid);
+  return sharedSocket!;
+};
+
+const closeSharedSocket = (reason: string) => {
+  if (!sharedSocket) return;
+
+  sharedSocket.manualClose = true;
+  clearSharedTimers();
+
+  try {
+    sharedSocket.ws?.close(1000, reason);
+  } catch {
+    // ignore
+  }
+
+  sharedSocket.ws = null;
+  notifyConnection(false);
+  sharedSocket = null;
+};
+
 export function useSignaling(userId: string | undefined) {
   const [isConnected, setIsConnected] = useState(false);
   const [incomingCall, setIncomingCall] = useState<{ from: string; callType: 'audio' | 'video' } | null>(null);
-  
-  // Refs critiques pour stabilité
-  const wsRef = useRef<WebSocket | null>(null);
+
   const onMessageCallbackRef = useRef<((msg: SignalMessage) => void) | null>(null);
-  const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  
-  // NOUVEAU: Protection contre les connexions multiples
-  const isConnectingRef = useRef<boolean>(false);
-  const userIdRef = useRef<string | undefined>(undefined);
-  
-  // NOUVEAU: Heartbeat pour Hugging Face (évite les déconnexions)
-  const pingIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Construire l'URL WebSocket (stable, pas de dépendance à userId)
-  const getWsUrl = useCallback((uid: string) => {
-    const wsBase = SERVER_CONFIG.BASE_URL.replace('https', 'wss').replace('http', 'ws');
-    return `${wsBase}/ws/${uid}`;
-  }, []);
+  const handleSharedMessage = useCallback(
+    (data: SignalMessage) => {
+      // Gérer les appels entrants localement
+      if (data.type === 'call-request' && data.sender_id) {
+        const payload = data.payload as { callType?: 'audio' | 'video' };
+        setIncomingCall({ from: data.sender_id, callType: payload?.callType || 'audio' });
+      } else if (data.type === 'call-rejected' || data.type === 'call-ended') {
+        setIncomingCall(null);
+      }
 
-  // Connexion WebSocket - NE DÉPEND PLUS DE userId
-  const connect = useCallback(() => {
-    const uid = userIdRef.current;
-    if (!uid) {
-      console.log('[Signaling] ⚠️ Pas de userId, connexion annulée');
+      onMessageCallbackRef.current?.(data);
+    },
+    []
+  );
+
+  useEffect(() => {
+    // Logout / pas d'utilisateur: fermer le singleton
+    if (!userId) {
+      setIncomingCall(null);
+      setIsConnected(false);
+      if (sharedSocket) closeSharedSocket('logout');
       return;
     }
 
-    // PROTECTION: Ne pas créer de nouveau socket si déjà connecté/en cours
-    if (isConnectingRef.current) {
-      console.log('[Signaling] ⏳ Connexion déjà en cours, ignoré');
-      return;
-    }
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
-      console.log('[Signaling] ✅ Déjà connecté, ignoré');
-      return;
-    }
-    if (wsRef.current?.readyState === WebSocket.CONNECTING) {
-      console.log('[Signaling] ⏳ Socket en état CONNECTING, ignoré');
-      return;
-    }
+    const shared = ensureSharedSocket(userId);
 
-    isConnectingRef.current = true;
-    const url = getWsUrl(uid);
-    console.log('[Signaling] 🔌 Connexion à', url);
-    
-    try {
-      const ws = new WebSocket(url);
+    // S'abonner aux messages & états de connexion
+    const connectionListener: ConnectionListener = (connected) => setIsConnected(connected);
 
-      ws.onopen = () => {
-        console.log('[Signaling] ✅ Connecté');
-        isConnectingRef.current = false;
-        setIsConnected(true);
-        
-        // HEARTBEAT: Ping toutes les 25 secondes pour maintenir la connexion HF
-        if (pingIntervalRef.current) {
-          clearInterval(pingIntervalRef.current);
-        }
-        pingIntervalRef.current = setInterval(() => {
-          if (ws.readyState === WebSocket.OPEN) {
-            console.log('[Signaling] 💓 Envoi ping...');
-            ws.send(JSON.stringify({ type: 'ping' }));
-          }
-        }, 25000);
-      };
+    shared.messageListeners.add(handleSharedMessage);
+    shared.connectionListeners.add(connectionListener);
 
-      ws.onclose = (e) => {
-        console.log('[Signaling] ❌ Déconnecté', e.code, e.reason);
-        isConnectingRef.current = false;
-        setIsConnected(false);
-        wsRef.current = null;
-        
-        // Arrêter le heartbeat
-        if (pingIntervalRef.current) {
-          clearInterval(pingIntervalRef.current);
-          pingIntervalRef.current = null;
-        }
-        
-        // Reconnexion automatique après 3 secondes SI userId est toujours valide
-        if (userIdRef.current) {
-          reconnectTimeoutRef.current = setTimeout(() => {
-            console.log('[Signaling] 🔄 Tentative de reconnexion...');
-            connect();
-          }, 3000);
-        }
-      };
+    // sync
+    setIsConnected(shared.ws?.readyState === WebSocket.OPEN);
 
-      ws.onerror = (e) => {
-        console.error('[Signaling] ⚠️ Erreur WebSocket:', e);
-        isConnectingRef.current = false;
-      };
+    // Cleanup: on se désabonne seulement (NE PAS fermer le WS ici)
+    return () => {
+      shared.messageListeners.delete(handleSharedMessage);
+      shared.connectionListeners.delete(connectionListener);
+    };
+  }, [userId, handleSharedMessage]);
 
-      ws.onmessage = (event) => {
-        try {
-          const data: SignalMessage = JSON.parse(event.data);
-          
-          // Ignorer les pong (juste un ack du serveur)
-          if (data.type === 'pong') {
-            console.log('[Signaling] 💓 Pong reçu');
-            return;
-          }
-          
-          console.log('[Signaling] 📨 Message reçu:', data.type, 'de', data.sender_id);
-
-          // Gérer les appels entrants
-          if (data.type === 'call-request' && data.sender_id) {
-            const payload = data.payload as { callType?: 'audio' | 'video' };
-            setIncomingCall({
-              from: data.sender_id,
-              callType: payload?.callType || 'audio',
-            });
-          } else if (data.type === 'call-rejected' || data.type === 'call-ended') {
-            setIncomingCall(null);
-          }
-
-          // Callback externe pour le hook WebRTC
-          if (onMessageCallbackRef.current) {
-            onMessageCallbackRef.current(data);
-          }
-        } catch (err) {
-          console.error('[Signaling] ❌ Erreur parsing message:', err);
-        }
-      };
-
-      wsRef.current = ws;
-    } catch (err) {
-      console.error('[Signaling] ❌ Erreur création WebSocket:', err);
-      isConnectingRef.current = false;
-    }
-  }, [getWsUrl]); // PAS de userId dans les dépendances!
-
-  // Déconnexion propre
-  const disconnect = useCallback(() => {
-    console.log('[Signaling] 🔌 Déconnexion...');
-    
-    // Annuler reconnexion programmée
-    if (reconnectTimeoutRef.current) {
-      clearTimeout(reconnectTimeoutRef.current);
-      reconnectTimeoutRef.current = null;
-    }
-    
-    // Arrêter le heartbeat
-    if (pingIntervalRef.current) {
-      clearInterval(pingIntervalRef.current);
-      pingIntervalRef.current = null;
-    }
-    
-    // Fermer le socket
-    if (wsRef.current) {
-      wsRef.current.close();
-      wsRef.current = null;
-    }
-    
-    isConnectingRef.current = false;
-    setIsConnected(false);
-  }, []);
-
-  // Envoyer un signal
   const sendSignal = useCallback((targetId: string, type: SignalType, payload?: unknown) => {
-    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
-      console.warn('[Signaling] ⚠️ WebSocket non connecté');
+    const ws = sharedSocket?.ws;
+
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      console.warn('[Signaling] WebSocket not connected');
       return false;
     }
 
-    const message = {
-      type,
-      target_id: targetId,
-      payload,
-    };
+    ws.send(
+      JSON.stringify({
+        type,
+        target_id: targetId,
+        payload,
+      })
+    );
 
-    console.log('[Signaling] 📤 Envoi signal:', type, 'vers', targetId);
-    wsRef.current.send(JSON.stringify(message));
+    // Log uniquement pour les signaux "appel"
+    if (type !== 'ice-candidate') {
+      console.log('[Signaling] 📤', type, '->', targetId);
+    }
+
     return true;
   }, []);
 
-  // S'abonner aux messages (pour le hook WebRTC)
   const onMessage = useCallback((callback: (msg: SignalMessage) => void) => {
     onMessageCallbackRef.current = callback;
   }, []);
 
-  // Accepter un appel
   const acceptCall = useCallback(() => {
     if (incomingCall) {
       sendSignal(incomingCall.from, 'call-accepted', { callType: incomingCall.callType });
     }
   }, [incomingCall, sendSignal]);
 
-  // Refuser un appel
   const rejectCall = useCallback(() => {
     if (incomingCall) {
       sendSignal(incomingCall.from, 'call-rejected');
@@ -217,42 +323,13 @@ export function useSignaling(userId: string | undefined) {
     }
   }, [incomingCall, sendSignal]);
 
-  // Terminer un appel
-  const endCall = useCallback((targetId: string) => {
-    sendSignal(targetId, 'call-ended');
-    setIncomingCall(null);
-  }, [sendSignal]);
-
-  // EFFET PRINCIPAL: Connexion/déconnexion basée sur userId
-  useEffect(() => {
-    // Si userId a changé ET est valide
-    if (userId && userId !== userIdRef.current) {
-      console.log('[Signaling] 👤 userId changé:', userIdRef.current, '->', userId);
-      
-      // Déconnecter l'ancien si existant
-      if (userIdRef.current) {
-        disconnect();
-      }
-      
-      // Mettre à jour la ref et connecter
-      userIdRef.current = userId;
-      connect();
-    }
-    
-    // Si userId devient null/undefined, déconnecter
-    if (!userId && userIdRef.current) {
-      console.log('[Signaling] 👤 userId supprimé, déconnexion');
-      userIdRef.current = undefined;
-      disconnect();
-    }
-    
-    // Cleanup au démontage du composant
-    return () => {
-      console.log('[Signaling] 🧹 Cleanup useEffect');
-      userIdRef.current = undefined;
-      disconnect();
-    };
-  }, [userId, connect, disconnect]);
+  const endCall = useCallback(
+    (targetId: string) => {
+      sendSignal(targetId, 'call-ended');
+      setIncomingCall(null);
+    },
+    [sendSignal]
+  );
 
   return {
     isConnected,

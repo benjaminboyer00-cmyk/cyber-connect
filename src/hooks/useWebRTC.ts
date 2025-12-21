@@ -128,44 +128,18 @@ export const useWebRTC = (
   const createPeerConnection = useCallback((targetId: string) => {
     console.log('🔧 Création PeerConnection vers', targetId);
     
-    // Configuration ICE avec STUN + TURN pour traverser tous les types de NAT
-    // IMPORTANT: on utilise ici OpenRelayProject (hébergé par Metered) : gratuit et public
+    // Configuration ICE minimale (évite un gathering interminable)
+    // - 1 STUN Google
+    // - 1 TURN OpenRelay (Metered)
     const pc = new RTCPeerConnection({
       iceServers: [
-        // STUN (fallback)
         { urls: 'stun:stun.l.google.com:19302' },
-        { urls: 'stun:stun1.l.google.com:19302' },
-        { urls: 'stun:stun.relay.metered.ca:80' },
-
-        // TURN (gratuit) — Open Relay Project
-        // Identifiants publics fournis par le projet
-        {
-          urls: 'turn:openrelay.metered.ca:80',
-          username: 'openrelayproject',
-          credential: 'openrelayproject',
-        },
-        {
-          urls: 'turn:openrelay.metered.ca:80?transport=tcp',
-          username: 'openrelayproject',
-          credential: 'openrelayproject',
-        },
-        {
-          urls: 'turn:openrelay.metered.ca:443',
-          username: 'openrelayproject',
-          credential: 'openrelayproject',
-        },
         {
           urls: 'turn:openrelay.metered.ca:443?transport=tcp',
           username: 'openrelayproject',
           credential: 'openrelayproject',
         },
-        {
-          urls: 'turns:openrelay.metered.ca:443?transport=tcp',
-          username: 'openrelayproject',
-          credential: 'openrelayproject',
-        },
       ],
-      iceCandidatePoolSize: 10,
     });
 
     // Logs utiles pour diagnostiquer les chutes d'appel
@@ -185,20 +159,15 @@ export const useWebRTC = (
     };
 
     pc.onconnectionstatechange = () => {
-      console.log('🔗 Peer connectionState:', pc.connectionState);
+      // Ne pas raccrocher/cleaner sur des états transitoires ici.
+      // La logique "fatale" est gérée via iceConnectionState === 'failed'.
       if (pc.connectionState === 'failed') {
-        console.log('🔗❌ connectionState failed - nettoyage local');
-        cleanupLocalResources();
-      }
-      if (pc.connectionState === 'closed') {
-        console.log('🔗🛑 connectionState closed - nettoyage local');
-        cleanupLocalResources();
+        console.warn('🔗 connectionState failed');
       }
     };
 
     pc.onicecandidate = (event) => {
       if (event.candidate && signaling) {
-        console.log('📤 Envoi ICE candidate', event.candidate.type);
         signaling.sendSignal(targetId, 'ice-candidate', event.candidate.toJSON());
       }
     };
@@ -278,7 +247,9 @@ export const useWebRTC = (
       if (!message) return;
       
       const { type, sender_id, payload } = message;
-      console.log(`📥 Signal ${type} de ${sender_id}`);
+      if (type !== 'ice-candidate') {
+        console.log(`📥 Signal ${type} de ${sender_id}`);
+      }
 
       switch (type) {
         case 'offer':
