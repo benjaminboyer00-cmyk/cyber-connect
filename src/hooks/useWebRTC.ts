@@ -84,24 +84,61 @@ export const useWebRTC = (
     return error;
   }, []);
 
-  // Accès caméra/micro selon le type d'appel
+  // Accès caméra/micro selon le type d'appel avec vérification des devices
   const initializeLocalStream = useCallback(async (type: CallType): Promise<boolean> => {
     try {
-      console.log(`📹 Initialisation média (${type})...`);
-      const constraints = {
-        audio: true,
-        video: type === 'video'
+      console.log(`📹 Initialisation média pour: ${type}`);
+      
+      // D'abord lister les devices disponibles
+      try {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        console.log('📋 Devices disponibles:', devices.map(d => `${d.kind}: ${d.label || 'non nommé'}`));
+      } catch (deviceError) {
+        console.warn('⚠️ Impossible de lister les devices:', deviceError);
+      }
+      
+      // Constraintes flexibles
+      const constraints: MediaStreamConstraints = {
+        audio: type !== 'video' ? true : {
+          echoCancellation: true,
+          noiseSuppression: true
+        },
+        video: type === 'video' ? {
+          width: { ideal: 640 },
+          height: { ideal: 480 },
+          facingMode: 'user'
+        } : false
       };
+      
+      console.log('🎯 Contraintes:', constraints);
+      
       const stream = await navigator.mediaDevices.getUserMedia(constraints);
       localStreamRef.current = stream;
       setLocalStream(stream);
-      console.log('✅ Média initialisé:', { 
-        audio: stream.getAudioTracks().length, 
-        video: stream.getVideoTracks().length 
+      
+      console.log('✅ Stream obtenu:', {
+        audioTracks: stream.getAudioTracks().length,
+        videoTracks: stream.getVideoTracks().length
       });
+      
       return true;
     } catch (error) {
       console.error('❌ Erreur média:', error);
+      
+      // Fallback: essayer sans vidéo si c'était un appel vidéo
+      if (type === 'video') {
+        console.log('🔄 Fallback: essai audio seul...');
+        try {
+          const audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          localStreamRef.current = audioStream;
+          setLocalStream(audioStream);
+          console.log('✅ Stream audio obtenu en fallback');
+          return true;
+        } catch (audioError) {
+          console.error('❌ Échec fallback audio:', audioError);
+        }
+      }
+      
       setCallState('failed');
       return false;
     }
@@ -297,10 +334,14 @@ export const useWebRTC = (
     const handleSignalMessage = async (message: any) => {
       if (!message) return;
       
-      const { type, sender_id, payload } = message;
+      const { type, sender_id, payload, data } = message;
       if (type !== 'ice-candidate') {
         console.log(`📥 Signal ${type} de ${sender_id}`);
       }
+
+      // Extraire les données SDP (peut être dans payload ou data.sdp)
+      const signalData = data || {};
+      const sdpData = payload || signalData.sdp || signalData;
 
       switch (type) {
         case 'offer':
@@ -310,6 +351,66 @@ export const useWebRTC = (
           }
 
           try {
+            console.log('🔍 Analyse offer reçue:', {
+              hasPayload: !!payload,
+              hasData: !!data,
+              hasSdp: !!sdpData,
+              sdpType: sdpData?.type,
+              sdpLength: sdpData?.sdp?.length
+            });
+
+            // VALIDATION CRITIQUE
+            if (!sdpData) {
+              console.error('❌ Offer sans SDP');
+              throw new Error('Invalid offer: missing SDP data');
+            }
+
+            // CORRECTION du type si null/undefined
+            if (!sdpData.type || sdpData.type === 'null' || sdpData.type === null) {
+              console.warn('⚠️ Type SDP invalide, correction à "offer"');
+              sdpData.type = 'offer';
+            }
+
+            // VÉRIFICATION finale
+            if (sdpData.type !== 'offer') {
+              console.error(`❌ Type SDP incorrect: ${sdpData.type}, attendu: offer`);
+              sdpData.type = 'offer'; // Correction forcée
+            }
+
+            console.log('✅ Offer validée, traitement...');
+            if (callState !== 'idle' && callState !== 'ringing') {
+              console.log('⚠️ Déjà en appel, ignore offre');
+              return;
+            }
+
+            console.log('🔍 Analyse offer reçue:', {
+              hasPayload: !!payload,
+              hasData: !!data,
+              hasSdp: !!sdpData,
+              sdpType: sdpData?.type,
+              sdpLength: sdpData?.sdp?.length
+            });
+
+            // VALIDATION CRITIQUE
+            if (!sdpData) {
+              console.error('❌ Offer sans SDP');
+              throw new Error('Invalid offer: missing SDP data');
+            }
+
+            // CORRECTION du type si null/undefined
+            if (!sdpData.type || sdpData.type === 'null' || sdpData.type === null) {
+              console.warn('⚠️ Type SDP invalide, correction à "offer"');
+              sdpData.type = 'offer';
+            }
+
+            // VÉRIFICATION finale
+            if (sdpData.type !== 'offer') {
+              console.error(`❌ Type SDP incorrect: ${sdpData.type}, attendu: offer`);
+              sdpData.type = 'offer'; // Correction forcée
+            }
+
+            console.log('✅ Offer validée, traitement...');
+
             setCallState('ringing');
             currentCallRef.current = { targetId: sender_id, callerId: sender_id };
             setIsCaller(false);
@@ -332,7 +433,7 @@ export const useWebRTC = (
               });
             }
 
-            await pc.setRemoteDescription(new RTCSessionDescription(payload));
+            await pc.setRemoteDescription(new RTCSessionDescription(sdpData));
             isRemoteDescriptionSet.current = true;
 
             // Vider immédiatement la file d'attente ICE
@@ -354,12 +455,45 @@ export const useWebRTC = (
           }
 
           try {
-            await peerConnectionRef.current.setRemoteDescription(new RTCSessionDescription(payload));
+            // Extraire les données SDP pour answer aussi
+            const answerData = payload || signalData.sdp || signalData;
+
+            // VALIDATION du SDP avant utilisation
+            console.log('📥 Réception answer de', sender_id);
+            
+            // VALIDER que l'answer a un type valide
+            if (!answerData || typeof answerData !== 'object') {
+              console.error('❌ Answer invalide: payload manquant ou incorrect', answerData);
+              throw new Error('Invalid answer: missing or incorrect payload');
+            }
+            
+            // CORRECTION du type si null/undefined
+            if (!answerData.type || answerData.type === 'null' || answerData.type === null) {
+              console.warn('⚠️ Type SDP invalide pour answer, correction à "answer"');
+              answerData.type = 'answer';
+            }
+            
+            // VÉRIFIER le type SDP
+            if (!['offer', 'answer', 'pranswer', 'rollback'].includes(answerData.type)) {
+              console.error('❌ Type SDP invalide:', answerData.type);
+              answerData.type = 'answer';
+              console.log('🔧 Type SDP corrigé à "answer"');
+            }
+            
+            console.log('✅ Answer validée:', {
+              type: answerData.type,
+              hasSdp: !!answerData.sdp,
+              sdpLength: answerData.sdp?.length || 0
+            });
+
+            await peerConnectionRef.current.setRemoteDescription(new RTCSessionDescription(answerData));
             isRemoteDescriptionSet.current = true;
             
             // Vider immédiatement la file d'attente ICE
             await processPendingCandidates();
             console.log('✅ Réponse traitée');
+            
+            // Note: L'answer est créée dans acceptCall, pas ici
           } catch (error) {
             const err = error instanceof Error ? error : new Error(String(error));
             handleCallError(err, 'answer processing');
@@ -455,11 +589,73 @@ export const useWebRTC = (
         });
       }
 
-      const offer = await pc.createOffer();
+      // CRÉATION DE L'OFFRE avec validation
+      console.log('🎯 Création offer avec contraintes...');
+      
+      const offerOptions: RTCOfferOptions = {
+        offerToReceiveAudio: true,
+        offerToReceiveVideo: true,
+        iceRestart: false
+      };
+      
+      const offer = await pc.createOffer(offerOptions);
+      
+      // LOG détaillé
+      console.log('📤 Offer générée:', {
+        type: offer.type,
+        sdpLength: offer.sdp?.length || 0,
+        sdpPreview: offer.sdp?.substring(0, 100) + '...'
+      });
+      
+      // VALIDATION et CORRECTION du type
+      if (!offer.type || offer.type === 'null' || offer.type === null) {
+        console.warn('⚠️ Offer sans type valide, correction...');
+        (offer as any).type = 'offer';
+      }
+      
+      // S'assurer que le SDP n'est pas vide
+      if (!offer.sdp || offer.sdp.length < 10) {
+        console.error('❌ SDP trop court ou vide');
+        throw new Error('SDP invalide: trop court ou vide');
+      }
+      
       await pc.setLocalDescription(offer);
-
-      signaling.sendSignal(targetId, 'offer', offer);
-      console.log('📤 Offre envoyée');
+      
+      // PRÉPARATION pour envoi - s'assurer que le format est correct
+      const offerToSend: RTCSessionDescriptionInit = {
+        type: offer.type,
+        sdp: offer.sdp
+      };
+      
+      // DEBUG DÉTAILLÉ avant envoi
+      console.log(`📡 [SEND_SIGNAL_DEBUG] Envoi offer:`, {
+        type: 'offer',
+        targetId: targetId,
+        dataKeys: Object.keys(offerToSend),
+        sdpPresent: !!offerToSend.sdp,
+        sdpType: offerToSend.type,
+        sdpTypeValid: offerToSend.type === 'offer' || offerToSend.type === 'answer',
+        sdpLength: offerToSend.sdp?.length || 0,
+        sdpPreview: offerToSend.sdp?.substring(0, 100) + '...'
+      });
+      
+      // STRINGIFY pour voir exactement ce qui est envoyé
+      const payloadToSend = {
+        type: 'offer',
+        target_id: targetId,
+        payload: offerToSend
+      };
+      
+      console.log('📦 Payload envoyé (stringifié):', JSON.stringify(payloadToSend, null, 2));
+      
+      // Vérifier que signaling est disponible
+      if (!signaling) {
+        console.error('❌ Signaling non disponible pour envoyer offer');
+        throw new Error('Signaling not available');
+      }
+      
+      signaling.sendSignal(targetId, 'offer', offerToSend);
+      console.log('✅ Offre envoyée avec succès');
 
     } catch (error) {
       const err = error instanceof Error ? error : new Error(String(error));
@@ -479,10 +675,50 @@ export const useWebRTC = (
       console.log('✅ Acceptation appel');
       const pc = peerConnectionRef.current;
       const answer = await pc.createAnswer();
+      
+      // VALIDATION et CORRECTION du type answer
+      if (!answer.type || answer.type === 'null' || answer.type === null) {
+        console.warn('⚠️ Answer sans type valide, correction...');
+        (answer as any).type = 'answer';
+      }
+      
       await pc.setLocalDescription(answer);
 
-      signaling.sendSignal(currentCallRef.current.callerId, 'answer', answer);
+      // DEBUG DÉTAILLÉ avant envoi de l'answer
+      const answerToSend: RTCSessionDescriptionInit = {
+        type: answer.type,
+        sdp: answer.sdp
+      };
+      
+      console.log(`📡 [SEND_SIGNAL_DEBUG] Envoi answer:`, {
+        type: 'answer',
+        targetId: currentCallRef.current.callerId,
+        dataKeys: Object.keys(answerToSend),
+        sdpPresent: !!answerToSend.sdp,
+        sdpType: answerToSend.type,
+        sdpTypeValid: answerToSend.type === 'offer' || answerToSend.type === 'answer',
+        sdpLength: answerToSend.sdp?.length || 0,
+        sdpPreview: answerToSend.sdp?.substring(0, 100) + '...'
+      });
+      
+      // STRINGIFY pour voir exactement ce qui est envoyé
+      const answerPayloadToSend = {
+        type: 'answer',
+        target_id: currentCallRef.current.callerId,
+        payload: answerToSend
+      };
+      
+      console.log('📦 Answer payload envoyé (stringifié):', JSON.stringify(answerPayloadToSend, null, 2));
+      
+      // Vérifier que signaling est disponible
+      if (!signaling) {
+        console.error('❌ Signaling non disponible pour envoyer answer');
+        throw new Error('Signaling not available');
+      }
+
+      signaling.sendSignal(currentCallRef.current.callerId, 'answer', answerToSend);
       setCallState('connected');
+      console.log('✅ Answer envoyée avec succès');
     } catch (error) {
       const err = error instanceof Error ? error : new Error(String(error));
       handleCallError(err, 'call acceptance');

@@ -264,27 +264,32 @@ export function useMessages(conversationId: string | null, userId: string | unde
   }, [conversationId, fetchMessages]);
 
   /**
-   * Real-time subscription avec déchiffrement ciblé immédiat
+   * Fonction pour s'abonner aux messages Realtime
    */
-  useEffect(() => {
-    if (!conversationId) return;
-
-    console.log('[Realtime] 📡 Abonnement aux messages de', conversationId);
-
-    const channel = supabase
-      .channel(`messages-${conversationId}`)
+  const subscribeToMessages = useCallback((convId: string) => {
+    console.log(`[Realtime] 📡 Abonnement aux messages de ${convId}`);
+    
+    // VÉRIFIE que supabase est bien configuré
+    if (!supabase) {
+      console.error('❌ Supabase non initialisé');
+      return null;
+    }
+    
+    const subscription = supabase
+      .channel(`messages:${convId}`)
       .on(
         'postgres_changes',
         {
           event: 'INSERT',
           schema: 'public',
           table: 'messages',
-          filter: `conversation_id=eq.${conversationId}`
+          filter: `conversation_id=eq.${convId}`
         },
         async (payload) => {
           if (!isMountedRef.current) return;
           
           const newMessage = payload.new as Message;
+          console.log('[Realtime] 📨 NOUVEAU MESSAGE REALTIME:', payload);
           console.log('[Realtime] 📨 Nouveau message détecté:', newMessage.id);
 
           try {
@@ -352,13 +357,40 @@ export function useMessages(conversationId: string | null, userId: string | unde
           }
         }
       )
-      .subscribe();
+      .subscribe((status) => {
+        console.log(`[Realtime] Subscription status: ${status}`);
+        if (status === 'SUBSCRIBED') {
+          console.log(`[Realtime] ✅ Abonnement actif pour ${convId}`);
+        } else if (status === 'CHANNEL_ERROR') {
+          console.error(`[Realtime] ❌ Erreur d'abonnement pour ${convId}`);
+        }
+      });
+    
+    return subscription;
+  }, [decryptSingleMessage, getProfile, safeSetState]);
 
+  /**
+   * Real-time subscription avec déchiffrement ciblé immédiat
+   */
+  useEffect(() => {
+    if (!conversationId) return;
+
+    console.log(`🔄 Initialisation messages pour ${conversationId}`);
+    
+    // 1. Charger les messages existants
+    fetchMessages();
+    
+    // 2. S'abonner aux nouveaux messages
+    const subscription = subscribeToMessages(conversationId);
+    
+    // 3. Nettoyage
     return () => {
-      console.log('[Realtime] 📴 Désabonnement de', conversationId);
-      supabase.removeChannel(channel);
+      console.log(`🧹 Nettoyage subscription ${conversationId}`);
+      if (subscription) {
+        supabase?.removeChannel(subscription);
+      }
     };
-  }, [conversationId, decryptSingleMessage, getProfile, safeSetState]);
+  }, [conversationId, fetchMessages, subscribeToMessages]);
 
   /**
    * Envoi de message via le serveur Python

@@ -484,6 +484,188 @@ async def report_message(payload: ReportPayload):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.post("/api/calls/create")
+async def create_call(payload: dict):
+    """
+    Créer un nouvel appel dans la base de données
+    """
+    try:
+        caller_id = payload.get("caller_id")
+        receiver_id = payload.get("receiver_id")
+        call_type = payload.get("call_type", "audio")
+        
+        if not caller_id or not receiver_id:
+            raise HTTPException(status_code=400, detail="caller_id and receiver_id are required")
+        
+        if call_type not in ["audio", "video"]:
+            call_type = "audio"
+        
+        call_data = {
+            "caller_id": caller_id,
+            "receiver_id": receiver_id,
+            "call_type": call_type,
+            "status": "calling",
+            "started_at": datetime.now().isoformat()
+        }
+        
+        if supabase_client:
+            result = supabase_client.table("calls").insert(call_data).execute()
+            if result.data:
+                print(f"✅ Appel créé: {result.data[0]['id']}")
+                return {
+                    "success": True,
+                    "call_id": result.data[0]["id"],
+                    "call": result.data[0]
+                }
+        
+        # Mode simulation
+        call_id = f"call_{int(time.time())}"
+        return {
+            "success": True,
+            "call_id": call_id,
+            "simulated": True
+        }
+        
+    except Exception as e:
+        print(f"❌ Erreur création appel: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/calls/history/{user_id}")
+async def get_call_history(user_id: str):
+    """
+    Récupérer l'historique des appels d'un utilisateur
+    """
+    try:
+        if not user_id:
+            raise HTTPException(status_code=400, detail="user_id is required")
+        
+        if supabase_client:
+            # Récupérer les appels où l'utilisateur est caller ou receiver
+            result = supabase_client.table("calls") \
+                .select("*") \
+                .or_(f"caller_id.eq.{user_id},receiver_id.eq.{user_id}") \
+                .order("created_at", desc=True) \
+                .limit(50) \
+                .execute()
+            
+            if result.data:
+                return {
+                    "success": True,
+                    "calls": result.data,
+                    "count": len(result.data)
+                }
+        
+        # Mode simulation
+        return {
+            "success": True,
+            "calls": [],
+            "simulated": True
+        }
+        
+    except Exception as e:
+        print(f"❌ Erreur récupération historique: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/calls/update")
+async def update_call(payload: dict):
+    """
+    Mettre à jour le statut d'un appel
+    """
+    try:
+        call_id = payload.get("call_id")
+        status = payload.get("status")
+        ended_at = payload.get("ended_at")
+        duration_seconds = payload.get("duration_seconds")
+        
+        if not call_id or not status:
+            raise HTTPException(status_code=400, detail="call_id and status are required")
+        
+        if status not in ["calling", "accepted", "rejected", "ended", "missed"]:
+            raise HTTPException(status_code=400, detail="Invalid status")
+        
+        update_data = {
+            "status": status,
+            "updated_at": datetime.now().isoformat()
+        }
+        
+        if ended_at:
+            update_data["ended_at"] = ended_at
+        
+        if duration_seconds is not None:
+            update_data["duration_seconds"] = duration_seconds
+        
+        if supabase_client:
+            result = supabase_client.table("calls") \
+                .update(update_data) \
+                .eq("id", call_id) \
+                .execute()
+            
+            if result.data:
+                print(f"✅ Appel {call_id} mis à jour: {status}")
+                return {
+                    "success": True,
+                    "call": result.data[0]
+                }
+        
+        return {
+            "success": True,
+            "simulated": True
+        }
+        
+    except Exception as e:
+        print(f"❌ Erreur mise à jour appel: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/debug/webrtc")
+async def debug_webrtc(payload: dict):
+    """
+    Endpoint pour debugger WebRTC - analyse les messages offer/answer
+    """
+    print("=" * 60)
+    print("🔧 DEBUG WEBRTC")
+    print("=" * 60)
+    
+    # Analyse du payload
+    print(f"Type: {payload.get('type')}")
+    print(f"Target ID: {payload.get('target_id')}")
+    
+    data = payload.get('payload') or payload.get('data') or {}
+    
+    if 'sdp' in data:
+        sdp = data['sdp']
+        print(f"SDP Type: {sdp.get('type', 'MISSING')}")
+        print(f"SDP Length: {len(sdp.get('sdp', ''))}")
+        
+        # Validation
+        if not sdp.get('type'):
+            print("⚠️ ERREUR: Type SDP manquant!")
+        elif sdp.get('type') not in ['offer', 'answer', 'pranswer', 'rollback']:
+            print(f"⚠️ ERREUR: Type SDP invalide: {sdp.get('type')}")
+    elif isinstance(data, dict) and 'type' in data:
+        # Format direct (sdp directement dans payload)
+        print(f"SDP Type (direct): {data.get('type', 'MISSING')}")
+        print(f"SDP Length (direct): {len(data.get('sdp', ''))}")
+        
+        if not data.get('type'):
+            print("⚠️ ERREUR: Type SDP manquant!")
+        elif data.get('type') not in ['offer', 'answer', 'pranswer', 'rollback']:
+            print(f"⚠️ ERREUR: Type SDP invalide: {data.get('type')}")
+    else:
+        print("⚠️ Format de données non reconnu")
+        print(f"   Keys disponibles: {list(data.keys()) if isinstance(data, dict) else 'N/A'}")
+    
+    print("=" * 60)
+    
+    return {
+        "status": "debugged",
+        "payload_received": True,
+        "sdp_valid": (
+            ('sdp' in data and data['sdp'].get('type') in ['offer', 'answer', 'pranswer', 'rollback']) or
+            (isinstance(data, dict) and data.get('type') in ['offer', 'answer', 'pranswer', 'rollback'])
+        ),
+        "timestamp": datetime.now().isoformat()
+    }
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # WEBSOCKET - Signaling WebRTC (Appels Audio/Vidéo)
 # ═══════════════════════════════════════════════════════════════════════════════
