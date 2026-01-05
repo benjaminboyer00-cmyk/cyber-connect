@@ -196,15 +196,23 @@ const connectSharedSocket = (uid: string) => {
 
     ws.onmessage = (event) => {
       try {
-        const data: SignalMessage = JSON.parse(event.data);
+        const data: any = JSON.parse(event.data);
 
         if (data.type === 'pong') return; // Ignore pong silencieusement
+
+        // Gérer les erreurs du backend
+        if (data.type === 'error') {
+          console.error('[Signaling] 📥 Signal error de', data.target_id || 'undefined', ':', data.message);
+          // Broadcast l'erreur pour que useWebRTC puisse la gérer
+          broadcastMessage(data as SignalMessage);
+          return;
+        }
 
         if (shouldLogSignal(data.type)) {
           console.log('[Signaling] 📨', data.type, 'de', data.sender_id);
         }
 
-        broadcastMessage(data);
+        broadcastMessage(data as SignalMessage);
       } catch (err) {
         console.error('[Signaling] parse error:', err);
       }

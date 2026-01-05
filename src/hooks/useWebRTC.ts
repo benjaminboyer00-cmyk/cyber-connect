@@ -10,6 +10,7 @@
  */
 
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { toast } from 'sonner';
 
 export type CallState = 'idle' | 'calling' | 'ringing' | 'connected' | 'failed';
 export type CallType = 'audio' | 'video';
@@ -55,6 +56,33 @@ export const useWebRTC = (
 
   // Timeout pour ICE failed
   const disconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  /**
+   * Gestionnaire d'erreur centralisé pour WebRTC
+   */
+  const handleCallError = useCallback((error: Error, context: string) => {
+    console.error(`❌ WebRTC Error [${context}]:`, error);
+    
+    // Réinitialiser les ressources
+    if (localStreamRef.current) {
+      localStreamRef.current.getTracks().forEach(track => track.stop());
+      localStreamRef.current = null;
+    }
+    
+    if (peerConnectionRef.current) {
+      peerConnectionRef.current.close();
+      peerConnectionRef.current = null;
+    }
+    
+    // Notifier l'utilisateur
+    toast.error(`Call failed: ${error.message}`);
+    
+    // Réinitialiser l'état
+    setCallState('failed');
+    setRemoteStream(null);
+    
+    return error;
+  }, []);
 
   // Accès caméra/micro selon le type d'appel
   const initializeLocalStream = useCallback(async (type: CallType): Promise<boolean> => {
@@ -166,42 +194,25 @@ export const useWebRTC = (
   const createPeerConnection = useCallback((targetId: string) => {
     console.log('🔧 Création PeerConnection vers', targetId);
     
-    // Configuration ICE Metered.ca (ports 80, 443, UDP et TCP)
+    // Configuration ICE optimisée : 1 STUN (Google) + 2 TURN (openrelay gratuit)
     const pc = new RTCPeerConnection({
       iceServers: [
-        { urls: "stun:stun.l.google.com:19302" },
-        { urls: "stun:stun.relay.metered.ca:80" },
-        // TURN UDP port 80
-        {
-          urls: "turn:standard.relay.metered.ca:80",
-          username: "2ce8447dffad525621446d76",
-          credential: "vQ4YEJGIKoc9MmTx",
+        // 1. STUN gratuit de Google (pour NAT traversal simple)
+        { urls: 'stun:stun.l.google.com:19302' },
+        // 2. TURN gratuit (pour les connexions difficiles)
+        { 
+          urls: 'turn:openrelay.metered.ca:80',
+          username: 'openrelayproject',
+          credential: 'openrelayproject'
         },
-        // TURN UDP port 443
-        {
-          urls: "turn:standard.relay.metered.ca:443",
-          username: "2ce8447dffad525621446d76",
-          credential: "vQ4YEJGIKoc9MmTx",
-        },
-        // TURN TCP port 80
-        {
-          urls: "turn:standard.relay.metered.ca:80?transport=tcp",
-          username: "2ce8447dffad525621446d76",
-          credential: "vQ4YEJGIKoc9MmTx",
-        },
-        // TURN TCP port 443
-        {
-          urls: "turn:standard.relay.metered.ca:443?transport=tcp",
-          username: "2ce8447dffad525621446d76",
-          credential: "vQ4YEJGIKoc9MmTx",
-        },
-        // TURNS (TLS) port 443
-        {
-          urls: "turns:standard.relay.metered.ca:443?transport=tcp",
-          username: "2ce8447dffad525621446d76",
-          credential: "vQ4YEJGIKoc9MmTx",
-        },
+        { 
+          urls: 'turn:openrelay.metered.ca:443',
+          username: 'openrelayproject', 
+          credential: 'openrelayproject'
+        }
       ],
+      iceCandidatePoolSize: 10,
+      iceTransportPolicy: 'all' as RTCIceTransportPolicy
     });
 
     pc.onicegatheringstatechange = () => {
@@ -329,7 +340,8 @@ export const useWebRTC = (
             console.log('🔔 Appel entrant prêt - en attente acceptation');
 
           } catch (error) {
-            console.error('❌ Erreur traitement offre:', error);
+            const err = error instanceof Error ? error : new Error(String(error));
+            handleCallError(err, 'offer processing');
             cleanupLocalResources();
           }
           break;
@@ -349,7 +361,8 @@ export const useWebRTC = (
             await processPendingCandidates();
             console.log('✅ Réponse traitée');
           } catch (error) {
-            console.error('❌ Erreur réponse:', error);
+            const err = error instanceof Error ? error : new Error(String(error));
+            handleCallError(err, 'answer processing');
             cleanupLocalResources();
           }
           break;
@@ -376,11 +389,42 @@ export const useWebRTC = (
           console.log('📞 Appel terminé par distant');
           cleanupLocalResources();
           break;
+
+        case 'error':
+          // Gérer les erreurs du backend (utilisateur non connecté, etc.)
+          const errorData = message as any;
+          const errorMessage = errorData.message || 'Erreur de signaling';
+          const errorTargetId = errorData.target_id || 'inconnu';
+          
+          console.error(`📥 Signal error from ${errorData.sender_id || 'server'}: ${errorMessage}`);
+          console.error(`Error details:`, {
+            target: errorTargetId,
+            code: errorData.code,
+            available: errorData.available_users
+          });
+          
+          // Si on est en train d'appeler et que l'erreur concerne notre target, annuler l'appel
+          if (isCallerRef.current && currentCallRef.current.targetId === errorTargetId) {
+            console.error('❌ Call failed due to signaling error');
+            
+            // Notifier l'utilisateur
+            toast.error(`Call failed: ${errorMessage}`);
+            
+            // Fermer la connexion WebRTC si elle existe
+            if (peerConnectionRef.current) {
+              peerConnectionRef.current.close();
+              peerConnectionRef.current = null;
+            }
+            
+            setCallState('failed');
+            cleanupLocalResources();
+          }
+          break;
       }
     };
 
     signaling.onMessage(handleSignalMessage);
-  }, [signaling, callState, initializeLocalStream, createPeerConnection, processPendingCandidates, cleanupLocalResources]);
+  }, [signaling, callState, initializeLocalStream, createPeerConnection, processPendingCandidates, cleanupLocalResources, handleCallError]);
 
   // Appeler un utilisateur
   const callUser = useCallback(async (targetId: string, type: CallType = 'video') => {
@@ -418,7 +462,8 @@ export const useWebRTC = (
       console.log('📤 Offre envoyée');
 
     } catch (error) {
-      console.error('❌ Erreur appel:', error);
+      const err = error instanceof Error ? error : new Error(String(error));
+      handleCallError(err, 'call initiation');
       cleanupLocalResources();
     }
   }, [callState, currentUserId, signaling, initializeLocalStream, createPeerConnection, cleanupLocalResources]);
@@ -439,7 +484,8 @@ export const useWebRTC = (
       signaling.sendSignal(currentCallRef.current.callerId, 'answer', answer);
       setCallState('connected');
     } catch (error) {
-      console.error('❌ Erreur acceptation:', error);
+      const err = error instanceof Error ? error : new Error(String(error));
+      handleCallError(err, 'call acceptance');
       cleanupLocalResources();
     }
   }, [callState, signaling, cleanupLocalResources]);

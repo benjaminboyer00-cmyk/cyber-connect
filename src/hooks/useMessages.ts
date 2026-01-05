@@ -11,6 +11,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { SERVER_CONFIG, getEndpointUrl, checkServerHealth } from '@/config/server';
 import type { Tables } from '@/integrations/supabase/types';
+import { toast } from 'sonner';
 
 type Message = Tables<'messages'>;
 type Profile = Tables<'profiles'>;
@@ -148,10 +149,40 @@ export function useMessages(conversationId: string | null, userId: string | unde
       const data = await response.json();
       const messagesData: Message[] = Array.isArray(data) ? data : (data.messages || []);
 
-      console.log('[fetchMessages] ✅ Messages déchiffrés:', messagesData.length);
+      console.log('[fetchMessages] ✅ Messages récupérés:', messagesData.length);
+
+      // Fallback de déchiffrement côté frontend avec Promise.all pour paralléliser
+      const processedMessages = await Promise.all(
+        messagesData.map(async (msg: any) => {
+          // Si le backend n'a pas pu déchiffrer
+          if (msg.content && msg._decrypted === false && msg.content.startsWith('gAAAA')) {
+            try {
+              console.log(`[fetchMessages] 🔓 Tentative de déchiffrement frontend pour message ${msg.id}`);
+              
+              const decryptedContent = await decryptSingleMessage(msg.content);
+              
+              // Vérifier que le déchiffrement a réussi (ne commence pas par [Erreur)
+              if (decryptedContent && !decryptedContent.startsWith('[Erreur')) {
+                return {
+                  ...msg,
+                  content: decryptedContent,
+                  _decrypted: true,
+                  _fallback_decrypted: true // Flag pour indiquer que c'est un fallback frontend
+                };
+              }
+            } catch (error) {
+              console.warn(`[fetchMessages] ⚠️ Échec déchiffrement frontend pour message ${msg.id}:`, error);
+            }
+          }
+          return msg;
+        })
+      );
+
+      // Utiliser les messages traités
+      const messagesDataProcessed: Message[] = processedMessages as Message[];
 
       // Get sender profiles
-      const senderIds = [...new Set(messagesData?.map(m => m.sender_id).filter(Boolean) as string[])];
+      const senderIds = [...new Set(messagesDataProcessed.map(m => m.sender_id).filter(Boolean) as string[])];
       
       let profileMap = new Map<string, Profile>();
       if (senderIds.length > 0) {
@@ -162,7 +193,7 @@ export function useMessages(conversationId: string | null, userId: string | unde
         profileMap = new Map(profiles?.map(p => [p.id, p]));
       }
 
-      const messagesWithSenders: MessageWithSender[] = messagesData.map(m => ({
+      const messagesWithSenders: MessageWithSender[] = messagesDataProcessed.map(m => ({
         ...m,
         sender: m.sender_id ? profileMap.get(m.sender_id) || null : null
       }));
@@ -174,8 +205,8 @@ export function useMessages(conversationId: string | null, userId: string | unde
       safeSetState(setLoading, false);
 
       // Mark messages as read
-      if (uid && messagesData?.length) {
-        const unreadIds = messagesData
+      if (uid && messagesDataProcessed.length) {
+        const unreadIds = messagesDataProcessed
           .filter(m => !m.is_read && m.sender_id !== uid)
           .map(m => m.id);
 
@@ -191,6 +222,7 @@ export function useMessages(conversationId: string | null, userId: string | unde
     } catch (error) {
       isFetchingRef.current = false;
       console.error('[fetchMessages] ❌ Erreur, fallback Supabase direct:', error);
+      toast.error('Failed to load messages');
       
       // Fallback: lecture directe depuis Supabase
       const convId = conversationIdRef.current;
