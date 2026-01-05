@@ -378,38 +378,6 @@ export const useWebRTC = (
             }
 
             console.log('✅ Offer validée, traitement...');
-            if (callState !== 'idle' && callState !== 'ringing') {
-              console.log('⚠️ Déjà en appel, ignore offre');
-              return;
-            }
-
-            console.log('🔍 Analyse offer reçue:', {
-              hasPayload: !!payload,
-              hasData: !!data,
-              hasSdp: !!sdpData,
-              sdpType: sdpData?.type,
-              sdpLength: sdpData?.sdp?.length
-            });
-
-            // VALIDATION CRITIQUE
-            if (!sdpData) {
-              console.error('❌ Offer sans SDP');
-              throw new Error('Invalid offer: missing SDP data');
-            }
-
-            // CORRECTION du type si null/undefined
-            if (!sdpData.type || sdpData.type === 'null' || sdpData.type === null) {
-              console.warn('⚠️ Type SDP invalide, correction à "offer"');
-              sdpData.type = 'offer';
-            }
-
-            // VÉRIFICATION finale
-            if (sdpData.type !== 'offer') {
-              console.error(`❌ Type SDP incorrect: ${sdpData.type}, attendu: offer`);
-              sdpData.type = 'offer'; // Correction forcée
-            }
-
-            console.log('✅ Offer validée, traitement...');
 
             setCallState('ringing');
             currentCallRef.current = { targetId: sender_id, callerId: sender_id };
