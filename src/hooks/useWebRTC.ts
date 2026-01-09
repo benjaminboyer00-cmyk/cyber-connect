@@ -257,7 +257,8 @@ export const useWebRTC = (
         }
       ],
       iceCandidatePoolSize: 5,
-      iceTransportPolicy: 'all' as RTCIceTransportPolicy
+      // FORCER TURN uniquement pour debug - à remettre à 'all' après
+      iceTransportPolicy: 'relay' as RTCIceTransportPolicy
     });
 
     pc.onicegatheringstatechange = () => {
