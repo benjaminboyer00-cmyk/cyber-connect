@@ -231,38 +231,25 @@ export const useWebRTC = (
   const createPeerConnection = useCallback((targetId: string) => {
     console.log('🔧 Création PeerConnection vers', targetId);
     
-    // Configuration ICE avec serveurs STUN/TURN metered.ca
-    // NOUVEAUX CREDENTIALS - 09/01/2026
+    // Configuration ICE - 3 serveurs max pour éviter ralentissement
     const pc = new RTCPeerConnection({
       iceServers: [
-        // STUN
-        { urls: 'stun:stun.relay.metered.ca:80' },
-        // TURN UDP
+        // STUN Google (gratuit, stable)
+        { urls: 'stun:stun.l.google.com:19302' },
+        // TURN UDP metered.ca
         {
           urls: 'turn:standard.relay.metered.ca:80',
           username: '47cb28373be5c46a7be641f1',
           credential: '2jxrBLtEF5gqhfD/'
         },
-        // TURN TCP
-        {
-          urls: 'turn:standard.relay.metered.ca:80?transport=tcp',
-          username: '47cb28373be5c46a7be641f1',
-          credential: '2jxrBLtEF5gqhfD/'
-        },
-        // TURN 443
-        {
-          urls: 'turn:standard.relay.metered.ca:443',
-          username: '47cb28373be5c46a7be641f1',
-          credential: '2jxrBLtEF5gqhfD/'
-        },
-        // TURNS TLS
+        // TURNS TLS (pour réseaux restrictifs)
         {
           urls: 'turns:standard.relay.metered.ca:443?transport=tcp',
           username: '47cb28373be5c46a7be641f1',
           credential: '2jxrBLtEF5gqhfD/'
         }
       ],
-      iceCandidatePoolSize: 10,
+      iceCandidatePoolSize: 2,
       iceTransportPolicy: 'all' as RTCIceTransportPolicy
     });
 
@@ -464,10 +451,14 @@ export const useWebRTC = (
 
             // Ajouter les tracks AVANT setRemoteDescription pour qu'ils soient dans l'answer
             if (localStreamRef.current) {
-              localStreamRef.current.getTracks().forEach(track => {
-                console.log(`📤 Ajout track local: ${track.kind}, enabled=${track.enabled}`);
+              const tracks = localStreamRef.current.getTracks();
+              console.log(`📤 CALLEE: Ajout de ${tracks.length} tracks locaux`);
+              tracks.forEach(track => {
+                console.log(`📤 Ajout track local: ${track.kind}, enabled=${track.enabled}, muted=${track.muted}`);
                 pc.addTrack(track, localStreamRef.current!);
               });
+            } else {
+              console.error('❌ CALLEE: PAS DE STREAM LOCAL - l\'autre ne m\'entendra pas!');
             }
 
             // Puis setRemoteDescription
@@ -539,15 +530,24 @@ export const useWebRTC = (
             
             // Log transceivers après answer pour debug
             const transceivers = peerConnectionRef.current.getTransceivers();
-            console.log('📡 Transceivers après answer (caller):', transceivers.map(t => ({
+            console.log('📡 CALLER Transceivers après answer:', transceivers.map(t => ({
               mid: t.mid,
               direction: t.direction,
               currentDirection: t.currentDirection,
               senderTrack: t.sender?.track?.kind || 'none',
+              senderEnabled: t.sender?.track?.enabled,
               receiverTrack: t.receiver?.track?.kind || 'none',
               receiverEnabled: t.receiver?.track?.enabled,
               receiverMuted: t.receiver?.track?.muted
             })));
+            
+            // Vérifier si on a bien un receiver track pour l'audio
+            const audioTransceiver = transceivers.find(t => t.receiver?.track?.kind === 'audio');
+            if (audioTransceiver?.receiver?.track) {
+              console.log('🔊 CALLER: Audio receiver track trouvé, muted:', audioTransceiver.receiver.track.muted);
+            } else {
+              console.error('❌ CALLER: PAS de receiver audio track!');
+            }
             
             // Vider immédiatement la file d'attente ICE
             await processPendingCandidates();
