@@ -231,21 +231,33 @@ export const useWebRTC = (
   const createPeerConnection = useCallback((targetId: string) => {
     console.log('🔧 Création PeerConnection vers', targetId);
     
-    // Configuration ICE optimisée : 1 STUN (Google) + 2 TURN (openrelay gratuit)
+    // Configuration ICE avec serveurs STUN/TURN fonctionnels
     const pc = new RTCPeerConnection({
       iceServers: [
-        // 1. STUN gratuit de Google (pour NAT traversal simple)
+        // STUN Google (fiable)
         { urls: 'stun:stun.l.google.com:19302' },
-        // 2. TURN gratuit (pour les connexions difficiles)
-        { 
-          urls: 'turn:openrelay.metered.ca:80',
-          username: 'openrelayproject',
-          credential: 'openrelayproject'
+        { urls: 'stun:stun1.l.google.com:19302' },
+        { urls: 'stun:stun2.l.google.com:19302' },
+        // TURN Metered (gratuit, fonctionnel)
+        {
+          urls: 'turn:a.relay.metered.ca:80',
+          username: 'e8dd65c92c80d446b55a3545',
+          credential: 'kfuYXpQx3mZSMz+y'
         },
-        { 
-          urls: 'turn:openrelay.metered.ca:443',
-          username: 'openrelayproject', 
-          credential: 'openrelayproject'
+        {
+          urls: 'turn:a.relay.metered.ca:80?transport=tcp',
+          username: 'e8dd65c92c80d446b55a3545',
+          credential: 'kfuYXpQx3mZSMz+y'
+        },
+        {
+          urls: 'turn:a.relay.metered.ca:443',
+          username: 'e8dd65c92c80d446b55a3545',
+          credential: 'kfuYXpQx3mZSMz+y'
+        },
+        {
+          urls: 'turns:a.relay.metered.ca:443?transport=tcp',
+          username: 'e8dd65c92c80d446b55a3545',
+          credential: 'kfuYXpQx3mZSMz+y'
         }
       ],
       iceCandidatePoolSize: 10,
@@ -277,8 +289,26 @@ export const useWebRTC = (
     };
 
     pc.ontrack = (event) => {
-      console.log('📥 Track distant reçu');
+      const trackInfo = {
+        kind: event.track.kind,
+        id: event.track.id,
+        streamId: event.streams[0]?.id,
+        enabled: event.track.enabled,
+        muted: event.track.muted
+      };
+      console.log('📥 Track distant reçu:', trackInfo);
+      
       if (event.streams && event.streams[0]) {
+        // Vérifier que ce n'est pas le même stream que le local
+        const remoteStreamId = event.streams[0].id;
+        const localStreamId = localStreamRef.current?.id;
+        
+        if (remoteStreamId === localStreamId) {
+          console.warn('⚠️ ATTENTION: Le stream distant a le même ID que le local!');
+        } else {
+          console.log('✅ Stream distant différent du local:', { remoteStreamId, localStreamId });
+        }
+        
         setRemoteStream(event.streams[0]);
       }
     };
@@ -384,7 +414,9 @@ export const useWebRTC = (
             setIsCaller(false);
             isCallerRef.current = false;
             
-            const incomingType: CallType = 'video';
+            // Extraire le callType depuis l'offer (envoyé par l'appelant)
+            const incomingType: CallType = (payload?.callType === 'audio' || sdpData?.callType === 'audio') ? 'audio' : 'video';
+            console.log('📞 Type d\'appel reçu:', incomingType);
             callTypeRef.current = incomingType;
             setCallType(incomingType);
 
@@ -459,7 +491,10 @@ export const useWebRTC = (
             
             // Vider immédiatement la file d'attente ICE
             await processPendingCandidates();
-            console.log('✅ Réponse traitée');
+            
+            // IMPORTANT: Le caller doit passer en 'connected' après avoir reçu l'answer
+            setCallState('connected');
+            console.log('✅ Réponse traitée - Appel connecté');
             
             // Note: L'answer est créée dans acceptCall, pas ici
           } catch (error) {
@@ -575,8 +610,8 @@ export const useWebRTC = (
         sdpPreview: offer.sdp?.substring(0, 100) + '...'
       });
       
-      // VALIDATION et CORRECTION du type
-      if (!offer.type || offer.type === 'null' || offer.type === null) {
+      // VALIDATION et CORRECTION du type (cast en any pour éviter erreur TS)
+      if (!offer.type || (offer.type as any) === 'null' || offer.type === null) {
         console.warn('⚠️ Offer sans type valide, correction...');
         (offer as any).type = 'offer';
       }
@@ -589,10 +624,11 @@ export const useWebRTC = (
       
       await pc.setLocalDescription(offer);
       
-      // PRÉPARATION pour envoi - s'assurer que le format est correct
-      const offerToSend: RTCSessionDescriptionInit = {
+      // PRÉPARATION pour envoi - inclure le callType pour que le destinataire sache le type d'appel
+      const offerToSend = {
         type: offer.type,
-        sdp: offer.sdp
+        sdp: offer.sdp,
+        callType: type  // 'audio' ou 'video' - important pour le destinataire
       };
       
       // DEBUG DÉTAILLÉ avant envoi
@@ -644,8 +680,8 @@ export const useWebRTC = (
       const pc = peerConnectionRef.current;
       const answer = await pc.createAnswer();
       
-      // VALIDATION et CORRECTION du type answer
-      if (!answer.type || answer.type === 'null' || answer.type === null) {
+      // VALIDATION et CORRECTION du type answer (cast en any pour éviter erreur TS)
+      if (!answer.type || (answer.type as any) === 'null' || answer.type === null) {
         console.warn('⚠️ Answer sans type valide, correction...');
         (answer as any).type = 'answer';
       }

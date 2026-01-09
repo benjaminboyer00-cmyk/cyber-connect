@@ -162,13 +162,8 @@ const connectSharedSocket = (uid: string) => {
         return;
       }
 
-      // NE PAS reconnecter sur code 1000 (Normal Closure)
-      if (e.code === 1000) {
-        console.log('[Signaling] Fermeture normale (1000) - pas de reconnexion auto');
-        return;
-      }
-
-      // NE PAS reconnecter sur code 1012 (Server-initiated)
+      // Reconnexion même sur code 1000 car HuggingFace peut fermer les connexions
+      // On ne bloque la reconnexion QUE si c'est une fermeture manuelle
       if (e.code === 1012) {
         console.log('[Signaling] Fermeture serveur (1012) - pas de reconnexion auto');
         return;
@@ -309,7 +304,25 @@ export function useSignaling(userId: string | undefined) {
     const ws = sharedSocket?.ws;
 
     if (!ws || ws.readyState !== WebSocket.OPEN) {
-      console.warn('[Signaling] WebSocket not connected');
+      console.warn('[Signaling] WebSocket not connected, tentative de reconnexion...');
+      
+      // Tenter une reconnexion si on a un userId
+      if (userId && sharedSocket) {
+        sharedSocket.manualClose = false;
+        connectSharedSocket(userId);
+        
+        // Réessayer l'envoi après un court délai
+        setTimeout(() => {
+          const retryWs = sharedSocket?.ws;
+          if (retryWs && retryWs.readyState === WebSocket.OPEN) {
+            retryWs.send(JSON.stringify({ type, target_id: targetId, payload }));
+            console.log('[Signaling] 📤 (retry)', type, '->', targetId);
+          } else {
+            console.error('[Signaling] ❌ Échec envoi après reconnexion:', type);
+          }
+        }, 1000);
+      }
+      
       return false;
     }
 
@@ -326,7 +339,7 @@ export function useSignaling(userId: string | undefined) {
     }
 
     return true;
-  }, []);
+  }, [userId]);
 
   const onMessage = useCallback((callback: (msg: SignalMessage) => void) => {
     onMessageCallbackRef.current = callback;

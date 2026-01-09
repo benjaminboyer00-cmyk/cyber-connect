@@ -345,7 +345,7 @@ export function useMessages(conversationId: string | null, userId: string | unde
           event: 'DELETE',
           schema: 'public',
           table: 'messages',
-          filter: `conversation_id=eq.${conversationId}`
+          filter: `conversation_id=eq.${convId}`
         },
         (payload) => {
           const deletedId = payload.old?.id;

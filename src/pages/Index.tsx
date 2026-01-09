@@ -7,6 +7,7 @@ import { useConversations } from '@/hooks/useConversations';
 import { useMessages } from '@/hooks/useMessages';
 import { useSignaling } from '@/hooks/useSignaling';
 import { useWebRTC } from '@/hooks/useWebRTC';
+import { useHeartbeat } from '@/hooks/useHeartbeat';
 import { Sidebar } from '@/components/chat/Sidebar';
 import { ChatArea } from '@/components/chat/ChatArea';
 import { SearchUsersModal } from '@/components/friends/SearchUsersModal';
@@ -26,6 +27,9 @@ export default function Index() {
   
   // Signaling WebSocket
   const signaling = useSignaling(user?.id);
+  
+  // Heartbeat pour la présence en ligne
+  const heartbeat = useHeartbeat(user?.id);
   
   // WebRTC avec signaling passé en paramètre
   const {

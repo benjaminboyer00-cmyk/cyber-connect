@@ -37,6 +37,7 @@ export function CallInterface({
 }: CallInterfaceProps) {
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
+  const remoteAudioRef = useRef<HTMLAudioElement>(null);
   const [isMuted, setIsMuted] = useState(false);
   const [isVideoOff, setIsVideoOff] = useState(false);
   const [callDuration, setCallDuration] = useState(0);
@@ -74,15 +75,67 @@ export function CallInterface({
   // Attacher les streams aux éléments vidéo
   useEffect(() => {
     if (localVideoRef.current && localStream) {
+      console.log('[CallInterface] 🎥 Attaching local stream:', {
+        id: localStream.id,
+        audioTracks: localStream.getAudioTracks().length,
+        videoTracks: localStream.getVideoTracks().length
+      });
       localVideoRef.current.srcObject = localStream;
     }
   }, [localStream]);
 
   useEffect(() => {
-    if (remoteVideoRef.current && remoteStream) {
-      remoteVideoRef.current.srcObject = remoteStream;
+    if (remoteStream) {
+      console.log('[CallInterface] 📹 Attaching remote stream:', {
+        id: remoteStream.id,
+        audioTracks: remoteStream.getAudioTracks().length,
+        videoTracks: remoteStream.getVideoTracks().length,
+        callType: callType
+      });
+      
+      // Pour les appels vidéo, utiliser l'élément video
+      if (remoteVideoRef.current && callType === 'video') {
+        remoteVideoRef.current.srcObject = remoteStream;
+        remoteVideoRef.current.play().catch(err => {
+          console.warn('[CallInterface] ⚠️ Autoplay vidéo bloqué:', err);
+        });
+      }
+      
+      // Pour les appels audio OU vidéo, TOUJOURS attacher l'audio séparément
+      if (remoteAudioRef.current) {
+        const audioEl = remoteAudioRef.current;
+        audioEl.srcObject = remoteStream;
+        audioEl.volume = 1.0; // Volume max
+        audioEl.muted = false; // S'assurer que l'élément n'est pas muté
+        
+        // Log les tracks audio
+        const audioTracks = remoteStream.getAudioTracks();
+        console.log('[CallInterface] 🔊 Audio tracks:', audioTracks.map(t => ({
+          id: t.id,
+          enabled: t.enabled,
+          muted: t.muted,
+          readyState: t.readyState
+        })));
+        
+        // Écouter quand le track devient unmuted
+        audioTracks.forEach(track => {
+          track.onunmute = () => {
+            console.log('[CallInterface] 🔊 Track audio unmuted!');
+            audioEl.play().catch(console.warn);
+          };
+          track.onended = () => {
+            console.log('[CallInterface] 🔇 Track audio ended');
+          };
+        });
+        
+        audioEl.play().then(() => {
+          console.log('[CallInterface] ✅ Audio playing!');
+        }).catch(err => {
+          console.warn('[CallInterface] ⚠️ Autoplay audio bloqué:', err);
+        });
+      }
     }
-  }, [remoteStream]);
+  }, [remoteStream, callType]);
 
   // Toggle mute
   const toggleMute = () => {
@@ -106,8 +159,28 @@ export function CallInterface({
 
   if (!isOpen) return null;
 
+  // Handler pour forcer la lecture audio si bloquée
+  const handleUserInteraction = () => {
+    if (remoteAudioRef.current && remoteStream) {
+      remoteAudioRef.current.play().catch(console.warn);
+    }
+    if (remoteVideoRef.current && remoteStream && callType === 'video') {
+      remoteVideoRef.current.play().catch(console.warn);
+    }
+  };
+
   return (
-    <div className="fixed inset-0 z-50 bg-background/95 backdrop-blur-sm flex flex-col">
+    <div 
+      className="fixed inset-0 z-50 bg-background/95 backdrop-blur-sm flex flex-col"
+      onClick={handleUserInteraction}
+    >
+      {/* Élément audio invisible pour jouer l'audio distant (IMPORTANT pour appels audio) */}
+      <audio
+        ref={remoteAudioRef}
+        autoPlay
+        playsInline
+        style={{ display: 'none' }}
+      />
       {/* Header avec chrono */}
       <div className="absolute top-4 left-0 right-0 z-10 flex justify-center">
         <Badge variant="secondary" className="px-4 py-2 text-lg font-mono flex items-center gap-2">
@@ -121,12 +194,16 @@ export function CallInterface({
       {/* Zone vidéo principale */}
       <div className="flex-1 relative flex items-center justify-center">
         {callType === 'video' && remoteStream ? (
-          // Vidéo distante en plein écran
+          // Vidéo distante en plein écran - IMPORTANT: PAS de muted pour entendre l'audio distant
           <video
             ref={remoteVideoRef}
             autoPlay
             playsInline
             className="w-full h-full object-cover"
+            onLoadedMetadata={(e) => {
+              // Forcer la lecture quand les métadonnées sont chargées
+              (e.target as HTMLVideoElement).play().catch(console.warn);
+            }}
           />
         ) : (
           // Avatar pour appel audio ou en attente

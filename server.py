@@ -688,27 +688,39 @@ async def websocket_signaling(websocket: WebSocket, user_id: str):
             data = await websocket.receive_text()
             message = json.loads(data)
             
-            target_id = message.get("target_id")
             msg_type = message.get("type")
-            payload = message.get("payload")
+            
+            # Support ping/pong pour heartbeat (le frontend envoie ping toutes les 20s)
+            if msg_type == "ping":
+                await websocket.send_json({"type": "pong", "timestamp": datetime.now().isoformat()})
+                continue
+            
+            target_id = message.get("target_id")
+            # Support à la fois "payload" et "data" pour compatibilité
+            payload = message.get("payload") or message.get("data")
             
             print(f"📞 [Signaling] {user_id} -> {target_id}: {msg_type}")
             
             # Relayer au destinataire
             if target_id and target_id in signaling_websockets:
                 target_ws = signaling_websockets[target_id]
+                # IMPORTANT: Envoyer avec "payload" (le frontend attend "payload")
                 await target_ws.send_json({
                     "type": msg_type,
                     "sender_id": user_id,
+                    "target_id": target_id,
                     "payload": payload
                 })
                 print(f"✅ [Signaling] Message relayé à {target_id}")
             else:
                 print(f"⚠️ [Signaling] Destinataire {target_id} non connecté")
-                # Notifier l'expéditeur que le destinataire n'est pas disponible
+                # Notifier l'expéditeur avec plus de détails
                 await websocket.send_json({
                     "type": "error",
-                    "message": f"User {target_id} is not connected"
+                    "error_type": "TARGET_NOT_CONNECTED",
+                    "message": f"User {target_id} is not connected",
+                    "target_id": target_id,
+                    "available_users": list(signaling_websockets.keys())
                 })
                 
     except WebSocketDisconnect:
