@@ -74,7 +74,7 @@ class MessagePayload(BaseModel):
     content: str = Field(..., min_length=1, max_length=5000)
     sender_id: str = Field(..., min_length=1, max_length=100)
     conversation_id: str = Field(..., min_length=1, max_length=100)
-    image_url: Optional[str] = Field(None, max_length=500)
+    image_url: Optional[str] = Field(None, max_length=2000)
     
     @validator('sender_id', 'conversation_id')
     def validate_ids(cls, v):

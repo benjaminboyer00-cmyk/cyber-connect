@@ -423,7 +423,17 @@ export function useMessages(conversationId: string | null, userId: string | unde
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.detail || `Server error: ${response.status}`);
+        // Handle Pydantic validation errors (array of objects) and regular errors
+        let errorMessage = `Server error: ${response.status}`;
+        if (typeof errorData.detail === 'string') {
+          errorMessage = errorData.detail;
+        } else if (Array.isArray(errorData.detail)) {
+          // Pydantic validation error format
+          errorMessage = errorData.detail.map((e: any) => e.msg || e.message || JSON.stringify(e)).join(', ');
+        } else if (errorData.error) {
+          errorMessage = String(errorData.error);
+        }
+        throw new Error(errorMessage);
       }
 
       const result = await response.json();

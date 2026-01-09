@@ -324,6 +324,17 @@ export const useWebRTC = (
 
       if (['connected', 'completed'].includes(pc.iceConnectionState)) {
         setCallState('connected');
+        
+        // Log des transceivers pour debug
+        const transceivers = pc.getTransceivers();
+        console.log('📡 Transceivers après connexion:', transceivers.map(t => ({
+          mid: t.mid,
+          direction: t.direction,
+          currentDirection: t.currentDirection,
+          sender: t.sender.track?.kind,
+          receiver: t.receiver.track?.kind
+        })));
+        
         return;
       }
 
