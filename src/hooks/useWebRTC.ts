@@ -231,25 +231,17 @@ export const useWebRTC = (
   const createPeerConnection = useCallback((targetId: string) => {
     console.log('🔧 Création PeerConnection vers', targetId);
     
-    // Configuration ICE - serveurs publics gratuits
+    // Configuration ICE - STUN seulement pour éviter les TURN instables
+    // TURN gratuits publics sont instables - à remplacer par un service payant en production
     const pc = new RTCPeerConnection({
       iceServers: [
-        // STUN Google (gratuit, stable)
+        // STUN Google (gratuit, très stable)
         { urls: 'stun:stun.l.google.com:19302' },
         { urls: 'stun:stun1.l.google.com:19302' },
-        // TURN OpenRelay (gratuit, public)
-        {
-          urls: 'turn:openrelay.metered.ca:80',
-          username: 'openrelayproject',
-          credential: 'openrelayproject'
-        },
-        {
-          urls: 'turn:openrelay.metered.ca:443',
-          username: 'openrelayproject',
-          credential: 'openrelayproject'
-        }
+        { urls: 'stun:stun2.l.google.com:19302' },
+        { urls: 'stun:stun3.l.google.com:19302' }
       ],
-      iceCandidatePoolSize: 2,
+      iceCandidatePoolSize: 4,
       iceTransportPolicy: 'all' as RTCIceTransportPolicy
     });
 
