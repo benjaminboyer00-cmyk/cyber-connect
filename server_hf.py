@@ -71,10 +71,17 @@ app.add_middleware(
 # ============================================================================
 
 class MessagePayload(BaseModel):
-    content: str = Field(..., min_length=1, max_length=5000)
+    content: str = Field(default="", max_length=5000)
     sender_id: str = Field(..., min_length=1, max_length=100)
     conversation_id: str = Field(..., min_length=1, max_length=100)
     image_url: Optional[str] = Field(None, max_length=2000)
+    
+    @validator('content', pre=True, always=True)
+    def validate_content_or_image(cls, v, values):
+        # Allow empty content only if image_url will be provided
+        if v is None:
+            return ""
+        return v
     
     @validator('sender_id', 'conversation_id')
     def validate_ids(cls, v):
