@@ -231,33 +231,31 @@ export const useWebRTC = (
   const createPeerConnection = useCallback((targetId: string) => {
     console.log('🔧 Création PeerConnection vers', targetId);
     
-    // Configuration ICE avec serveurs STUN/TURN metered.ca (endpoints global)
+    // Configuration ICE avec serveurs STUN/TURN metered.ca (cyber-connect.metered.live)
     const pc = new RTCPeerConnection({
       iceServers: [
         // STUN metered.ca
         { urls: 'stun:stun.relay.metered.ca:80' },
-        // STUN Google backup
-        { urls: 'stun:stun.l.google.com:19302' },
-        // TURN metered.ca - endpoints global avec credentials
+        // TURN metered.ca - standard endpoints
         {
-          urls: 'turn:global.relay.metered.ca:80',
-          username: 'e8dd65c92c80d446b55a3545',
-          credential: 'R9I6Uhz6arbFeNOJiD953Ffh4RDMEdyP1cIshZ_H-_nt90-9'
+          urls: 'turn:standard.relay.metered.ca:80',
+          username: '2ce8447dffad525621446d76',
+          credential: 'vQ4YEJGIKoc9MmTx'
         },
         {
-          urls: 'turn:global.relay.metered.ca:80?transport=tcp',
-          username: 'e8dd65c92c80d446b55a3545',
-          credential: 'R9I6Uhz6arbFeNOJiD953Ffh4RDMEdyP1cIshZ_H-_nt90-9'
+          urls: 'turn:standard.relay.metered.ca:80?transport=tcp',
+          username: '2ce8447dffad525621446d76',
+          credential: 'vQ4YEJGIKoc9MmTx'
         },
         {
-          urls: 'turn:global.relay.metered.ca:443',
-          username: 'e8dd65c92c80d446b55a3545',
-          credential: 'R9I6Uhz6arbFeNOJiD953Ffh4RDMEdyP1cIshZ_H-_nt90-9'
+          urls: 'turn:standard.relay.metered.ca:443',
+          username: '2ce8447dffad525621446d76',
+          credential: 'vQ4YEJGIKoc9MmTx'
         },
         {
-          urls: 'turns:global.relay.metered.ca:443?transport=tcp',
-          username: 'e8dd65c92c80d446b55a3545',
-          credential: 'R9I6Uhz6arbFeNOJiD953Ffh4RDMEdyP1cIshZ_H-_nt90-9'
+          urls: 'turns:standard.relay.metered.ca:443?transport=tcp',
+          username: '2ce8447dffad525621446d76',
+          credential: 'vQ4YEJGIKoc9MmTx'
         }
       ],
       iceCandidatePoolSize: 10,
