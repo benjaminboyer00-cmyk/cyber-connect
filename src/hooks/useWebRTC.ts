@@ -442,27 +442,44 @@ export const useWebRTC = (
             isRemoteDescriptionSet.current = false;
             pendingCandidatesQueue.current = [];
 
-            // IMPORTANT: setRemoteDescription AVANT addTrack pour que les transceivers
-            // soient correctement configurés en mode sendrecv
+            // IMPORTANT: setRemoteDescription AVANT d'assigner les tracks
             await pc.setRemoteDescription(new RTCSessionDescription(sdpData));
             isRemoteDescriptionSet.current = true;
 
-            // Ajouter les tracks APRÈS setRemoteDescription
+            // Utiliser les transceivers existants créés par l'offre
+            // au lieu de addTrack qui crée de NOUVEAUX transceivers
             if (localStreamRef.current) {
-              localStreamRef.current.getTracks().forEach(track => {
-                console.log(`📤 Ajout track local: ${track.kind}, enabled=${track.enabled}`);
-                pc.addTrack(track, localStreamRef.current!);
-              });
+              const transceivers = pc.getTransceivers();
+              console.log('📡 Transceivers reçus de l\'offre:', transceivers.length);
+              
+              for (const track of localStreamRef.current.getTracks()) {
+                // Trouver le transceiver correspondant au type de track
+                const transceiver = transceivers.find(
+                  t => t.receiver.track?.kind === track.kind && !t.sender.track
+                );
+                
+                if (transceiver) {
+                  // Utiliser replaceTrack sur le transceiver existant
+                  await transceiver.sender.replaceTrack(track);
+                  // Forcer la direction en sendrecv
+                  transceiver.direction = 'sendrecv';
+                  console.log(`📤 Track ${track.kind} assigné via replaceTrack, direction: sendrecv`);
+                } else {
+                  // Fallback: ajouter le track normalement
+                  console.log(`📤 Ajout track ${track.kind} via addTrack (pas de transceiver trouvé)`);
+                  pc.addTrack(track, localStreamRef.current!);
+                }
+              }
             }
 
             // Log les transceivers pour debug
-            const transceivers = pc.getTransceivers();
-            console.log('📡 Transceivers après ajout tracks:', transceivers.map(t => ({
+            const finalTransceivers = pc.getTransceivers();
+            console.log('📡 Transceivers après assignation:', finalTransceivers.map(t => ({
               mid: t.mid,
               direction: t.direction,
               currentDirection: t.currentDirection,
-              sender: t.sender?.track?.kind,
-              receiver: t.receiver?.track?.kind
+              senderTrack: t.sender?.track?.kind || 'none',
+              receiverTrack: t.receiver?.track?.kind || 'none'
             })));
 
             // Vider immédiatement la file d'attente ICE

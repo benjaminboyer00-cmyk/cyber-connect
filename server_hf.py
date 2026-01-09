@@ -338,12 +338,10 @@ class WebSocketManager:
             connection_id = f"conn_{user_id}_{int(time.time())}_{random.randint(1000, 9999)}"
             
             async with self._lock:
+                # NE PAS fermer l'ancienne connexion - simplement la remplacer
+                # L'ancienne connexion se fermera naturellement
                 if user_id in self.active_connections:
-                    old_conn = self.active_connections[user_id]
-                    try:
-                        await old_conn['websocket'].close(code=1000, reason="Nouvelle connexion")
-                    except:
-                        pass
+                    Logger.info(f"WebSocketManager: Remplacement connexion pour {user_id}")
                 
                 self.active_connections[user_id] = {
                     'websocket': websocket,
