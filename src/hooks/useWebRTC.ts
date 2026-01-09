@@ -231,30 +231,31 @@ export const useWebRTC = (
   const createPeerConnection = useCallback((targetId: string) => {
     console.log('🔧 Création PeerConnection vers', targetId);
     
-    // Configuration ICE avec serveurs STUN/TURN metered.ca
+    // Configuration ICE avec serveurs STUN/TURN metered.ca (endpoints global)
     const pc = new RTCPeerConnection({
       iceServers: [
-        // STUN Google
+        // STUN metered.ca
+        { urls: 'stun:stun.relay.metered.ca:80' },
+        // STUN Google backup
         { urls: 'stun:stun.l.google.com:19302' },
-        { urls: 'stun:stun1.l.google.com:19302' },
-        // TURN metered.ca avec credentials valides
+        // TURN metered.ca - endpoints global avec credentials
         {
-          urls: 'turn:a.relay.metered.ca:80',
+          urls: 'turn:global.relay.metered.ca:80',
           username: 'e8dd65c92c80d446b55a3545',
           credential: 'R9I6Uhz6arbFeNOJiD953Ffh4RDMEdyP1cIshZ_H-_nt90-9'
         },
         {
-          urls: 'turn:a.relay.metered.ca:80?transport=tcp',
+          urls: 'turn:global.relay.metered.ca:80?transport=tcp',
           username: 'e8dd65c92c80d446b55a3545',
           credential: 'R9I6Uhz6arbFeNOJiD953Ffh4RDMEdyP1cIshZ_H-_nt90-9'
         },
         {
-          urls: 'turn:a.relay.metered.ca:443',
+          urls: 'turn:global.relay.metered.ca:443',
           username: 'e8dd65c92c80d446b55a3545',
           credential: 'R9I6Uhz6arbFeNOJiD953Ffh4RDMEdyP1cIshZ_H-_nt90-9'
         },
         {
-          urls: 'turns:a.relay.metered.ca:443?transport=tcp',
+          urls: 'turns:global.relay.metered.ca:443?transport=tcp',
           username: 'e8dd65c92c80d446b55a3545',
           credential: 'R9I6Uhz6arbFeNOJiD953Ffh4RDMEdyP1cIshZ_H-_nt90-9'
         }
@@ -283,7 +284,13 @@ export const useWebRTC = (
 
     pc.onicecandidate = (event) => {
       if (event.candidate && signaling) {
+        // Log le type de candidat pour debug TURN
+        const candidateType = event.candidate.type || 'unknown';
+        const protocol = event.candidate.protocol || 'unknown';
+        console.log(`🧊 ICE candidate: type=${candidateType}, protocol=${protocol}, address=${event.candidate.address || 'hidden'}`);
         signaling.sendSignal(targetId, 'ice-candidate', event.candidate.toJSON());
+      } else if (!event.candidate) {
+        console.log('🧊 ICE gathering complete (null candidate)');
       }
     };
 
