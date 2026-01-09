@@ -231,22 +231,22 @@ export const useWebRTC = (
   const createPeerConnection = useCallback((targetId: string) => {
     console.log('🔧 Création PeerConnection vers', targetId);
     
-    // Configuration ICE - 3 serveurs max pour éviter ralentissement
+    // Configuration ICE - serveurs publics gratuits
     const pc = new RTCPeerConnection({
       iceServers: [
         // STUN Google (gratuit, stable)
         { urls: 'stun:stun.l.google.com:19302' },
-        // TURN UDP metered.ca
+        { urls: 'stun:stun1.l.google.com:19302' },
+        // TURN OpenRelay (gratuit, public)
         {
-          urls: 'turn:standard.relay.metered.ca:80',
-          username: '47cb28373be5c46a7be641f1',
-          credential: '2jxrBLtEF5gqhfD/'
+          urls: 'turn:openrelay.metered.ca:80',
+          username: 'openrelayproject',
+          credential: 'openrelayproject'
         },
-        // TURNS TLS (pour réseaux restrictifs)
         {
-          urls: 'turns:standard.relay.metered.ca:443?transport=tcp',
-          username: '47cb28373be5c46a7be641f1',
-          credential: '2jxrBLtEF5gqhfD/'
+          urls: 'turn:openrelay.metered.ca:443',
+          username: 'openrelayproject',
+          credential: 'openrelayproject'
         }
       ],
       iceCandidatePoolSize: 2,
