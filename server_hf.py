@@ -633,6 +633,111 @@ async def translate_text(payload: TranslationPayload):
         return {"status": "error", "detail": str(e)}
 
 # ============================================================================
+# UPLOAD PAR CHUNKS - IMAGES ET VOCAUX
+# ============================================================================
+
+# Stockage temporaire des chunks en cours d'upload
+pending_chunks: Dict[str, Dict] = {}
+
+@app.post("/api/upload_chunk")
+async def upload_chunk(
+    file: UploadFile = File(...),
+    filename: str = Form(...),
+    part: int = Form(...),
+    total: int = Form(...),
+    user_id: str = Form(...)
+):
+    """
+    Endpoint pour recevoir les chunks de fichiers (images, vocaux).
+    Le frontend envoie les fichiers en morceaux via FormData.
+    """
+    try:
+        # Lire le contenu du chunk
+        chunk_data = await file.read()
+        chunk_b64 = base64.b64encode(chunk_data).decode('utf-8')
+        
+        # Utiliser filename comme upload_id
+        upload_id = filename
+        
+        # Initialiser le stockage pour cet upload
+        if upload_id not in pending_chunks:
+            pending_chunks[upload_id] = {
+                "chunks": {},
+                "total_chunks": total,
+                "file_name": filename,
+                "user_id": user_id,
+                "created_at": generate_timestamp()
+            }
+        
+        # Stocker le chunk (part est 1-indexed depuis le frontend)
+        chunk_index = part - 1
+        pending_chunks[upload_id]["chunks"][chunk_index] = chunk_b64
+        received = len(pending_chunks[upload_id]["chunks"])
+        
+        Logger.info(f"📦 Chunk {part}/{total} reçu pour {filename}")
+        
+        # Vérifier si tous les chunks sont reçus
+        if received == total:
+            # Réassembler le fichier
+            chunks_data = pending_chunks[upload_id]["chunks"]
+            ordered_chunks = [chunks_data[i] for i in range(total)]
+            complete_data = "".join(ordered_chunks)
+            
+            # Décoder le base64
+            file_bytes = base64.b64decode(complete_data)
+            
+            Logger.success(f"✅ Fichier réassemblé: {filename} ({len(file_bytes)} bytes)")
+            
+            # Upload vers Supabase Storage
+            file_url = None
+            if supabase:
+                try:
+                    # Déterminer le content-type
+                    content_type = "application/octet-stream"
+                    if filename.endswith(('.png', '.jpg', '.jpeg', '.gif', '.webp')):
+                        content_type = f"image/{filename.split('.')[-1]}"
+                    elif filename.endswith('.webm'):
+                        content_type = "audio/webm"
+                    elif filename.endswith('.mp3'):
+                        content_type = "audio/mpeg"
+                    
+                    file_path = f"{user_id}/{int(time.time())}_{filename}"
+                    supabase.storage.from_("chat-files").upload(
+                        file_path,
+                        file_bytes,
+                        {"content-type": content_type}
+                    )
+                    file_url = f"{Config.SUPABASE_URL}/storage/v1/object/public/chat-files/{file_path}"
+                    Logger.success(f"☁️ Uploadé vers Supabase: {file_url}")
+                except Exception as e:
+                    Logger.error(f"Erreur upload Supabase", e)
+            
+            # Nettoyer
+            del pending_chunks[upload_id]
+            
+            return {
+                "success": True,
+                "complete": True,
+                "status": "complete",
+                "file_url": file_url,
+                "url": file_url,
+                "file_size": len(file_bytes),
+                "upload_id": upload_id
+            }
+        
+        return {
+            "success": True,
+            "complete": False,
+            "received": received,
+            "total": total,
+            "progress": round(received / total * 100, 1)
+        }
+        
+    except Exception as e:
+        Logger.error(f"Erreur chunk upload", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+# ============================================================================
 # ROUTES POUR LES APPELS
 # ============================================================================
 

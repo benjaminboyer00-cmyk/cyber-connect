@@ -42,7 +42,7 @@ export function MessageBubble({ message, isOwn, currentUserId, formatTime }: Mes
       }
 
       const data = await response.json();
-      setTranslation(data.translated_text || data.translation || data.text);
+      setTranslation(data.translated || data.translated_text || data.translation || data.text);
     } catch (error) {
       console.error('Translation error:', error);
       toast.error('Impossible de traduire le message');
