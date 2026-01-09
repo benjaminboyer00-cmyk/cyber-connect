@@ -442,14 +442,28 @@ export const useWebRTC = (
             isRemoteDescriptionSet.current = false;
             pendingCandidatesQueue.current = [];
 
+            // IMPORTANT: setRemoteDescription AVANT addTrack pour que les transceivers
+            // soient correctement configurés en mode sendrecv
+            await pc.setRemoteDescription(new RTCSessionDescription(sdpData));
+            isRemoteDescriptionSet.current = true;
+
+            // Ajouter les tracks APRÈS setRemoteDescription
             if (localStreamRef.current) {
               localStreamRef.current.getTracks().forEach(track => {
+                console.log(`📤 Ajout track local: ${track.kind}, enabled=${track.enabled}`);
                 pc.addTrack(track, localStreamRef.current!);
               });
             }
 
-            await pc.setRemoteDescription(new RTCSessionDescription(sdpData));
-            isRemoteDescriptionSet.current = true;
+            // Log les transceivers pour debug
+            const transceivers = pc.getTransceivers();
+            console.log('📡 Transceivers après ajout tracks:', transceivers.map(t => ({
+              mid: t.mid,
+              direction: t.direction,
+              currentDirection: t.currentDirection,
+              sender: t.sender?.track?.kind,
+              receiver: t.receiver?.track?.kind
+            })));
 
             // Vider immédiatement la file d'attente ICE
             await processPendingCandidates();
