@@ -231,32 +231,32 @@ export const useWebRTC = (
   const createPeerConnection = useCallback((targetId: string) => {
     console.log('🔧 Création PeerConnection vers', targetId);
     
-    // Configuration ICE avec serveurs STUN/TURN
-    // NOTE: Les serveurs TURN nécessitent des credentials valides
-    // Obtenir des credentials gratuits sur https://www.metered.ca/stun-turn
+    // Configuration ICE avec serveurs STUN/TURN metered.ca
     const pc = new RTCPeerConnection({
       iceServers: [
-        // STUN Google (gratuit, fiable)
+        // STUN Google
         { urls: 'stun:stun.l.google.com:19302' },
         { urls: 'stun:stun1.l.google.com:19302' },
-        // STUN alternatifs
-        { urls: 'stun:stun.stunprotocol.org:3478' },
-        { urls: 'stun:stun.voip.blackberry.com:3478' },
-        // TURN OpenRelay (gratuit, public)
+        // TURN metered.ca avec credentials valides
         {
-          urls: 'turn:openrelay.metered.ca:80',
-          username: 'openrelayproject',
-          credential: 'openrelayproject'
+          urls: 'turn:a.relay.metered.ca:80',
+          username: 'e8dd65c92c80d446b55a3545',
+          credential: 'R9I6Uhz6arbFeNOJiD953Ffh4RDMEdyP1cIshZ_H-_nt90-9'
         },
         {
-          urls: 'turn:openrelay.metered.ca:443',
-          username: 'openrelayproject',
-          credential: 'openrelayproject'
+          urls: 'turn:a.relay.metered.ca:80?transport=tcp',
+          username: 'e8dd65c92c80d446b55a3545',
+          credential: 'R9I6Uhz6arbFeNOJiD953Ffh4RDMEdyP1cIshZ_H-_nt90-9'
         },
         {
-          urls: 'turn:openrelay.metered.ca:443?transport=tcp',
-          username: 'openrelayproject',
-          credential: 'openrelayproject'
+          urls: 'turn:a.relay.metered.ca:443',
+          username: 'e8dd65c92c80d446b55a3545',
+          credential: 'R9I6Uhz6arbFeNOJiD953Ffh4RDMEdyP1cIshZ_H-_nt90-9'
+        },
+        {
+          urls: 'turns:a.relay.metered.ca:443?transport=tcp',
+          username: 'e8dd65c92c80d446b55a3545',
+          credential: 'R9I6Uhz6arbFeNOJiD953Ffh4RDMEdyP1cIshZ_H-_nt90-9'
         }
       ],
       iceCandidatePoolSize: 10,

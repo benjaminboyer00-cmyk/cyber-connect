@@ -90,7 +90,7 @@ export function CreateGroupModal({ open, onClose, friends, onCreateGroup }: Crea
             <p className="text-sm text-muted-foreground mb-2">
               Sélectionner les membres ({selectedFriends.size}/50)
             </p>
-            <ScrollArea className="max-h-60">
+            <ScrollArea className="h-60 overflow-y-auto">
               <div className="space-y-2">
                 {friends.length === 0 ? (
                   <p className="text-center text-muted-foreground py-4">
