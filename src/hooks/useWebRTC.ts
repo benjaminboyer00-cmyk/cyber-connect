@@ -231,34 +231,32 @@ export const useWebRTC = (
   const createPeerConnection = useCallback((targetId: string) => {
     console.log('🔧 Création PeerConnection vers', targetId);
     
-    // Configuration ICE avec serveurs STUN/TURN metered.ca (cyber-connect.metered.live)
+    // Configuration ICE avec serveurs STUN/TURN metered.ca
+    // Limité à 4 serveurs pour éviter le ralentissement de découverte
     const pc = new RTCPeerConnection({
       iceServers: [
-        // STUN metered.ca
+        // STUN
         { urls: 'stun:stun.relay.metered.ca:80' },
-        // TURN metered.ca - standard endpoints
+        // TURN UDP (prioritaire)
         {
           urls: 'turn:standard.relay.metered.ca:80',
           username: '2ce8447dffad525621446d76',
           credential: 'vQ4YEJGIKoc9MmTx'
         },
-        {
-          urls: 'turn:standard.relay.metered.ca:80?transport=tcp',
-          username: '2ce8447dffad525621446d76',
-          credential: 'vQ4YEJGIKoc9MmTx'
-        },
+        // TURN TCP (fallback si UDP bloqué)
         {
           urls: 'turn:standard.relay.metered.ca:443',
           username: '2ce8447dffad525621446d76',
           credential: 'vQ4YEJGIKoc9MmTx'
         },
+        // TURNS (TLS, dernier recours)
         {
           urls: 'turns:standard.relay.metered.ca:443?transport=tcp',
           username: '2ce8447dffad525621446d76',
           credential: 'vQ4YEJGIKoc9MmTx'
         }
       ],
-      iceCandidatePoolSize: 10,
+      iceCandidatePoolSize: 5,
       iceTransportPolicy: 'all' as RTCIceTransportPolicy
     });
 
@@ -551,13 +549,28 @@ export const useWebRTC = (
         case 'ice-candidate':
           try {
             if (isRemoteDescriptionSet.current && peerConnectionRef.current) {
+              // Vérifier que le PC est dans un état valide
+              const pcState = peerConnectionRef.current.signalingState;
+              if (pcState === 'closed') {
+                console.log('⚠️ ICE ignoré: PeerConnection fermé');
+                break;
+              }
               await peerConnectionRef.current.addIceCandidate(new RTCIceCandidate(payload));
-            } else {
+            } else if (peerConnectionRef.current) {
               pendingCandidatesQueue.current.push(payload);
               console.log('📦 ICE mis en file (remoteDesc pas encore set)');
+            } else {
+              // Pas de PeerConnection - ignorer silencieusement (ancien appel)
+              console.log('⚠️ ICE ignoré: pas de PeerConnection actif');
             }
           } catch (error) {
-            console.error('❌ Erreur ICE:', error);
+            // Ignorer les erreurs "Unknown ufrag" - normales entre appels
+            const errMsg = String(error);
+            if (errMsg.includes('Unknown ufrag') || errMsg.includes('unknown ufrag')) {
+              console.log('⚠️ ICE ignoré: ufrag obsolète (ancien appel)');
+            } else {
+              console.error('❌ Erreur ICE:', error);
+            }
           }
           break;
 
