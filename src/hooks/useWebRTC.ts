@@ -232,33 +232,38 @@ export const useWebRTC = (
     console.log('🔧 Création PeerConnection vers', targetId);
     
     // Configuration ICE avec serveurs STUN/TURN metered.ca
-    // Limité à 4 serveurs pour éviter le ralentissement de découverte
+    // NOUVEAUX CREDENTIALS - 09/01/2026
     const pc = new RTCPeerConnection({
       iceServers: [
         // STUN
         { urls: 'stun:stun.relay.metered.ca:80' },
-        // TURN UDP (prioritaire)
+        // TURN UDP
         {
           urls: 'turn:standard.relay.metered.ca:80',
-          username: '2ce8447dffad525621446d76',
-          credential: 'vQ4YEJGIKoc9MmTx'
+          username: '47cb28373be5c46a7be641f1',
+          credential: '2jxrBLtEF5gqhfD/'
         },
-        // TURN TCP (fallback si UDP bloqué)
+        // TURN TCP
+        {
+          urls: 'turn:standard.relay.metered.ca:80?transport=tcp',
+          username: '47cb28373be5c46a7be641f1',
+          credential: '2jxrBLtEF5gqhfD/'
+        },
+        // TURN 443
         {
           urls: 'turn:standard.relay.metered.ca:443',
-          username: '2ce8447dffad525621446d76',
-          credential: 'vQ4YEJGIKoc9MmTx'
+          username: '47cb28373be5c46a7be641f1',
+          credential: '2jxrBLtEF5gqhfD/'
         },
-        // TURNS (TLS, dernier recours)
+        // TURNS TLS
         {
           urls: 'turns:standard.relay.metered.ca:443?transport=tcp',
-          username: '2ce8447dffad525621446d76',
-          credential: 'vQ4YEJGIKoc9MmTx'
+          username: '47cb28373be5c46a7be641f1',
+          credential: '2jxrBLtEF5gqhfD/'
         }
       ],
-      iceCandidatePoolSize: 5,
-      // FORCER TURN uniquement pour debug - à remettre à 'all' après
-      iceTransportPolicy: 'relay' as RTCIceTransportPolicy
+      iceCandidatePoolSize: 10,
+      iceTransportPolicy: 'all' as RTCIceTransportPolicy
     });
 
     pc.onicegatheringstatechange = () => {
