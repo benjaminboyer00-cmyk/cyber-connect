@@ -835,6 +835,16 @@ async def websocket_heartbeat(websocket: WebSocket):
                         "protocol": "WebSocket"
                     }
                     
+                    # Mettre à jour le statut dans Supabase pour les pastilles
+                    if supabase:
+                        try:
+                            supabase.table("profiles").update({
+                                "status": status,
+                                "last_seen": generate_timestamp()
+                            }).eq("id", user_id).execute()
+                        except Exception as e:
+                            Logger.warning(f"Erreur update profil: {e}")
+                    
                     Logger.info(f"💓 Heartbeat reçu de {user_id}: {status}")
                     
                     # Confirmer la réception
@@ -865,6 +875,15 @@ async def websocket_heartbeat(websocket: WebSocket):
                 "last_seen": generate_timestamp(),
                 "protocol": "WebSocket"
             }
+            # Mettre à jour Supabase
+            if supabase:
+                try:
+                    supabase.table("profiles").update({
+                        "status": "offline",
+                        "last_seen": generate_timestamp()
+                    }).eq("id", user_id).execute()
+                except:
+                    pass
         Logger.info(f"💓 Heartbeat déconnecté: {user_id}")
     except Exception as e:
         Logger.error(f"Erreur Heartbeat pour {user_id}", e)

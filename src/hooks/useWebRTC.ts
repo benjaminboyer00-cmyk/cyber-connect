@@ -537,6 +537,18 @@ export const useWebRTC = (
             await peerConnectionRef.current.setRemoteDescription(new RTCSessionDescription(answerData));
             isRemoteDescriptionSet.current = true;
             
+            // Log transceivers après answer pour debug
+            const transceivers = peerConnectionRef.current.getTransceivers();
+            console.log('📡 Transceivers après answer (caller):', transceivers.map(t => ({
+              mid: t.mid,
+              direction: t.direction,
+              currentDirection: t.currentDirection,
+              senderTrack: t.sender?.track?.kind || 'none',
+              receiverTrack: t.receiver?.track?.kind || 'none',
+              receiverEnabled: t.receiver?.track?.enabled,
+              receiverMuted: t.receiver?.track?.muted
+            })));
+            
             // Vider immédiatement la file d'attente ICE
             await processPendingCandidates();
             
@@ -642,7 +654,12 @@ export const useWebRTC = (
       isCallerRef.current = true;
       currentCallRef.current = { targetId, callerId: currentUserId };
 
-      await initializeLocalStream(type);
+      const mediaOk = await initializeLocalStream(type);
+      if (!mediaOk || !localStreamRef.current) {
+        console.error('❌ Impossible de démarrer l\'appel sans micro/caméra');
+        cleanupLocalResources();
+        return;
+      }
 
       const pc = createPeerConnection(targetId);
       peerConnectionRef.current = pc;
