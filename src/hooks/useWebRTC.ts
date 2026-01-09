@@ -296,14 +296,14 @@ export const useWebRTC = (
       const trackInfo = {
         kind: event.track.kind,
         id: event.track.id,
-        streamId: event.streams[0]?.id,
+        streamId: event.streams[0]?.id || 'no-stream',
         enabled: event.track.enabled,
         muted: event.track.muted
       };
       console.log('📥 Track distant reçu:', trackInfo);
       
       if (event.streams && event.streams[0]) {
-        // Vérifier que ce n'est pas le même stream que le local
+        // Stream fourni par WebRTC
         const remoteStreamId = event.streams[0].id;
         const localStreamId = localStreamRef.current?.id;
         
@@ -314,6 +314,22 @@ export const useWebRTC = (
         }
         
         setRemoteStream(event.streams[0]);
+      } else {
+        // Pas de stream fourni (cas replaceTrack) - créer un MediaStream manuellement
+        console.log('⚠️ Track sans stream - création manuelle du MediaStream');
+        setRemoteStream(prev => {
+          const stream = prev || new MediaStream();
+          // Éviter les doublons
+          const existingTrack = stream.getTracks().find(t => t.kind === event.track.kind);
+          if (existingTrack && existingTrack.id !== event.track.id) {
+            stream.removeTrack(existingTrack);
+          }
+          if (!stream.getTracks().find(t => t.id === event.track.id)) {
+            stream.addTrack(event.track);
+            console.log(`✅ Track ${event.track.kind} ajouté au stream manuel`);
+          }
+          return stream;
+        });
       }
     };
 
@@ -442,39 +458,21 @@ export const useWebRTC = (
             isRemoteDescriptionSet.current = false;
             pendingCandidatesQueue.current = [];
 
-            // IMPORTANT: setRemoteDescription AVANT d'assigner les tracks
+            // Ajouter les tracks AVANT setRemoteDescription pour qu'ils soient dans l'answer
+            if (localStreamRef.current) {
+              localStreamRef.current.getTracks().forEach(track => {
+                console.log(`📤 Ajout track local: ${track.kind}, enabled=${track.enabled}`);
+                pc.addTrack(track, localStreamRef.current!);
+              });
+            }
+
+            // Puis setRemoteDescription
             await pc.setRemoteDescription(new RTCSessionDescription(sdpData));
             isRemoteDescriptionSet.current = true;
 
-            // Utiliser les transceivers existants créés par l'offre
-            // au lieu de addTrack qui crée de NOUVEAUX transceivers
-            if (localStreamRef.current) {
-              const transceivers = pc.getTransceivers();
-              console.log('📡 Transceivers reçus de l\'offre:', transceivers.length);
-              
-              for (const track of localStreamRef.current.getTracks()) {
-                // Trouver le transceiver correspondant au type de track
-                const transceiver = transceivers.find(
-                  t => t.receiver.track?.kind === track.kind && !t.sender.track
-                );
-                
-                if (transceiver) {
-                  // Utiliser replaceTrack sur le transceiver existant
-                  await transceiver.sender.replaceTrack(track);
-                  // Forcer la direction en sendrecv
-                  transceiver.direction = 'sendrecv';
-                  console.log(`📤 Track ${track.kind} assigné via replaceTrack, direction: sendrecv`);
-                } else {
-                  // Fallback: ajouter le track normalement
-                  console.log(`📤 Ajout track ${track.kind} via addTrack (pas de transceiver trouvé)`);
-                  pc.addTrack(track, localStreamRef.current!);
-                }
-              }
-            }
-
             // Log les transceivers pour debug
-            const finalTransceivers = pc.getTransceivers();
-            console.log('📡 Transceivers après assignation:', finalTransceivers.map(t => ({
+            const transceivers = pc.getTransceivers();
+            console.log('📡 Transceivers après setup:', transceivers.map(t => ({
               mid: t.mid,
               direction: t.direction,
               currentDirection: t.currentDirection,
