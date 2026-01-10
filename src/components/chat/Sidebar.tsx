@@ -1,10 +1,18 @@
 import { useState } from 'react';
-import { LogOut, Search, UserPlus, MessageSquarePlus, Users, Trash2 } from 'lucide-react';
+import { LogOut, Search, UserPlus, MessageSquarePlus, Users, Trash2, Shuffle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -15,6 +23,8 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
+import { AVATAR_STYLES, generateAvatarUrl, type AvatarStyle } from '@/hooks/useProfile';
+import { toast } from 'sonner';
 import type { Tables } from '@/integrations/supabase/types';
 import type { ConversationWithDetails } from '@/hooks/useConversations';
 import type { FriendWithProfile } from '@/hooks/useFriends';
@@ -33,6 +43,7 @@ interface SidebarProps {
   onNewChat: () => void;
   onViewRequests: () => void;
   onCreateGroup: () => void;
+  onUpdateAvatar?: (avatarUrl: string) => Promise<void>;
 }
 
 export function Sidebar({
@@ -46,11 +57,28 @@ export function Sidebar({
   onSearchUsers,
   onNewChat,
   onViewRequests,
-  onCreateGroup
+  onCreateGroup,
+  onUpdateAvatar
 }: SidebarProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [conversationToDelete, setConversationToDelete] = useState<string | null>(null);
+
+  const handleAvatarChange = async (style: AvatarStyle) => {
+    if (!profile?.username || !onUpdateAvatar) return;
+    const avatarUrl = generateAvatarUrl(profile.username, style);
+    await onUpdateAvatar(avatarUrl);
+    toast.success('Avatar mis à jour !');
+  };
+
+  const handleRandomAvatar = async () => {
+    if (!profile?.username || !onUpdateAvatar) return;
+    const randomStyle = AVATAR_STYLES[Math.floor(Math.random() * AVATAR_STYLES.length)];
+    const randomSeed = `${profile.username}-${Date.now()}`;
+    const avatarUrl = generateAvatarUrl(randomSeed, randomStyle);
+    await onUpdateAvatar(avatarUrl);
+    toast.success('Avatar aléatoire généré !');
+  };
 
   const filteredConversations = conversations.filter(conv => {
     const name = conv.is_group ? conv.name : conv.members[0]?.username;
@@ -75,12 +103,39 @@ export function Sidebar({
       <div className="p-4 border-b border-sidebar-border">
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-3">
-            <Avatar className="w-10 h-10 border-2 border-primary/50">
-              <AvatarImage src={profile?.avatar_url || ''} />
-              <AvatarFallback className="bg-primary/20 text-primary">
-                {profile?.username?.charAt(0).toUpperCase() || '?'}
-              </AvatarFallback>
-            </Avatar>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Avatar className="w-10 h-10 border-2 border-primary/50 cursor-pointer hover:opacity-80 transition-opacity">
+                  <AvatarImage src={profile?.avatar_url || ''} />
+                  <AvatarFallback className="bg-primary/20 text-primary">
+                    {profile?.username?.charAt(0).toUpperCase() || '?'}
+                  </AvatarFallback>
+                </Avatar>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="w-48 max-h-64 overflow-y-auto">
+                <DropdownMenuLabel>Changer d'avatar</DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={handleRandomAvatar} className="cursor-pointer">
+                  <Shuffle className="w-4 h-4 mr-2" />
+                  Avatar aléatoire
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                {AVATAR_STYLES.slice(0, 10).map((style) => (
+                  <DropdownMenuItem 
+                    key={style} 
+                    onClick={() => handleAvatarChange(style)}
+                    className="cursor-pointer"
+                  >
+                    <img 
+                      src={generateAvatarUrl(profile?.username || 'user', style, 24)} 
+                      alt={style}
+                      className="w-6 h-6 mr-2 rounded-full"
+                    />
+                    {style}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
             <div>
               <p className="font-semibold text-sidebar-foreground">{profile?.username || 'Utilisateur'}</p>
               <div className="flex items-center gap-1">

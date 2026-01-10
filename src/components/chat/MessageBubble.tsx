@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Globe, Loader2 } from 'lucide-react';
+import { Globe, Loader2, Music } from 'lucide-react';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { VoiceMessagePlayer } from './VoiceMessagePlayer';
@@ -10,6 +10,48 @@ import type { Tables } from '@/integrations/supabase/types';
 import type { MessageWithSender } from '@/hooks/useMessages';
 
 type Profile = Tables<'profiles'>;
+
+/**
+ * Détecte et extrait les liens Spotify d'un message
+ * Supporte: tracks, albums, playlists, artists, episodes
+ */
+function extractSpotifyLinks(text: string): { type: string; id: string; url: string }[] {
+  const spotifyRegex = /https?:\/\/open\.spotify\.com\/(track|album|playlist|artist|episode)\/([a-zA-Z0-9]+)(\?[^\s]*)?/g;
+  const matches: { type: string; id: string; url: string }[] = [];
+  let match;
+  
+  while ((match = spotifyRegex.exec(text)) !== null) {
+    matches.push({
+      type: match[1],
+      id: match[2],
+      url: match[0].split('?')[0] // URL sans query params
+    });
+  }
+  
+  return matches;
+}
+
+/**
+ * Composant Spotify Embed Player
+ */
+function SpotifyEmbed({ type, id }: { type: string; id: string }) {
+  // Hauteur selon le type de contenu
+  const height = type === 'track' || type === 'episode' ? 80 : 152;
+  
+  return (
+    <div className="mt-2 rounded-lg overflow-hidden">
+      <iframe
+        src={`https://open.spotify.com/embed/${type}/${id}?utm_source=generator&theme=0`}
+        width="100%"
+        height={height}
+        frameBorder="0"
+        allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
+        loading="lazy"
+        className="rounded-lg"
+      />
+    </div>
+  );
+}
 
 interface MessageBubbleProps {
   message: MessageWithSender;
@@ -52,6 +94,7 @@ export function MessageBubble({ message, isOwn, currentUserId, formatTime }: Mes
   };
 
   const isAudio = message.image_url?.match(/\.(webm|mp3|wav|ogg|m4a|mp4)$/i);
+  const spotifyLinks = message.content ? extractSpotifyLinks(message.content) : [];
 
   return (
     <div className={`flex items-end gap-2 ${isOwn ? 'flex-row-reverse' : ''}`}>
@@ -107,6 +150,15 @@ export function MessageBubble({ message, isOwn, currentUserId, formatTime }: Mes
                 )
               )}
               {message.content && <p className="text-sm">{message.content}</p>}
+              
+              {/* Spotify Embeds */}
+              {spotifyLinks.length > 0 && (
+                <div className="space-y-2">
+                  {spotifyLinks.map((link, index) => (
+                    <SpotifyEmbed key={`${link.id}-${index}`} type={link.type} id={link.id} />
+                  ))}
+                </div>
+              )}
             </div>
             
             {/* Traduction affichée en dessous */}

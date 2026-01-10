@@ -1,9 +1,26 @@
 import { useState, useRef, useEffect } from 'react';
-import { Send, Image, Phone, Video, MoreVertical, Users, X, Loader2, Mic, Square, Trash2 } from 'lucide-react';
+import { Send, Image, Phone, Video, MoreVertical, Users, X, Loader2, Mic, Square, Trash2, UserMinus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { useChunkUpload } from '@/hooks/useChunkUpload';
 import { useVoiceRecorder } from '@/hooks/useVoiceRecorder';
 import { MessageBubble } from './MessageBubble';
@@ -27,6 +44,7 @@ interface ChatAreaProps {
   callState?: CallState;
   signalingConnected?: boolean;
   onStartCall?: (targetUserId: string, type: 'audio' | 'video') => void;
+  onRemoveFriend?: (friendId: string) => void;
 }
 
 export function ChatArea({ 
@@ -41,10 +59,12 @@ export function ChatArea({
   callState = 'idle',
   signalingConnected = false,
   onStartCall,
+  onRemoveFriend,
 }: ChatAreaProps) {
   const [message, setMessage] = useState('');
   const [selectedImage, setSelectedImage] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const [removeDialogOpen, setRemoveDialogOpen] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { uploadFileByChunks, uploading, progress, reset: resetUpload } = useChunkUpload();
@@ -246,11 +266,56 @@ export function ChatArea({
               </Button>
             </>
           )}
-          <Button variant="ghost" size="icon" className="text-muted-foreground hover:text-foreground">
-            <MoreVertical className="w-5 h-5" />
-          </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="icon" className="text-muted-foreground hover:text-foreground">
+                <MoreVertical className="w-5 h-5" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              {!isGroup && contact && onRemoveFriend && (
+                <>
+                  <DropdownMenuItem 
+                    className="text-destructive focus:text-destructive cursor-pointer"
+                    onClick={() => setRemoveDialogOpen(true)}
+                  >
+                    <UserMinus className="w-4 h-4 mr-2" />
+                    Supprimer le contact
+                  </DropdownMenuItem>
+                </>
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </div>
+
+      {/* Dialog de confirmation suppression contact */}
+      <AlertDialog open={removeDialogOpen} onOpenChange={setRemoveDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Supprimer ce contact ?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Êtes-vous sûr de vouloir supprimer {contact?.username} de vos contacts ? 
+              Cette action est irréversible.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Annuler</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={() => {
+                if (contact?.id && onRemoveFriend) {
+                  onRemoveFriend(contact.id);
+                  toast.success(`${contact.username} supprimé de vos contacts`);
+                }
+                setRemoveDialogOpen(false);
+              }}
+            >
+              Supprimer
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Messages */}
       <ScrollArea className="flex-1 p-6 scrollbar-thin">

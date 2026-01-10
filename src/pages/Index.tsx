@@ -21,8 +21,8 @@ import { toast } from 'sonner';
 export default function Index() {
   const navigate = useNavigate();
   const { user, loading: authLoading, signOut } = useAuth();
-  const { profile } = useProfile(user?.id);
-  const { friends, pendingRequests, searchUsers, sendFriendRequest, acceptFriendRequest, rejectFriendRequest } = useFriends(user?.id);
+  const { profile, updateProfile } = useProfile(user?.id);
+  const { friends, pendingRequests, searchUsers, sendFriendRequest, acceptFriendRequest, rejectFriendRequest, removeFriend } = useFriends(user?.id);
   const { conversations, createConversation, createGroupConversation, deleteConversation, refetch: refetchConversations } = useConversations(user?.id);
   
   // Signaling WebSocket
@@ -184,6 +184,9 @@ export default function Index() {
         onNewChat={() => setNewChatModalOpen(true)}
         onViewRequests={() => setRequestsModalOpen(true)}
         onCreateGroup={() => setCreateGroupModalOpen(true)}
+        onUpdateAvatar={async (avatarUrl) => {
+          await updateProfile({ avatar_url: avatarUrl });
+        }}
       />
       
       <ChatArea
@@ -198,6 +201,13 @@ export default function Index() {
         callState={callState}
         signalingConnected={signaling.isConnected}
         onStartCall={handleStartCall}
+        onRemoveFriend={async (friendId) => {
+          const { error } = await removeFriend(friendId);
+          if (!error) {
+            setSelectedConversation(null);
+            refetchConversations();
+          }
+        }}
       />
 
       {/* Modal appel entrant */}

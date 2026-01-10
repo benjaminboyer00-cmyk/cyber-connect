@@ -208,6 +208,32 @@ export function useFriends(userId: string | undefined) {
     return { error };
   };
 
+  /**
+   * Supprimer un ami (supprime la relation d'amitié)
+   */
+  const removeFriend = async (friendId: string) => {
+    if (!userId) return { error: new Error('Not logged in') };
+
+    // Supprimer dans les deux sens (user_id -> friend_id ET friend_id -> user_id)
+    const { error: error1 } = await supabase
+      .from('friends')
+      .delete()
+      .eq('user_id', userId)
+      .eq('friend_id', friendId);
+
+    const { error: error2 } = await supabase
+      .from('friends')
+      .delete()
+      .eq('user_id', friendId)
+      .eq('friend_id', userId);
+
+    const error = error1 || error2;
+    if (!error) {
+      console.log('[useFriends] ✅ Ami supprimé');
+    }
+    return { error };
+  };
+
   return {
     friends,
     pendingRequests,
@@ -216,6 +242,7 @@ export function useFriends(userId: string | undefined) {
     sendFriendRequest,
     acceptFriendRequest,
     rejectFriendRequest,
+    removeFriend,
     refetch: fetchFriends
   };
 }

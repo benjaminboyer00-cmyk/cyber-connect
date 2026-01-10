@@ -465,7 +465,9 @@ supabase = db.client
 # ============================================================================
 
 def generate_timestamp() -> str:
-    return datetime.now().isoformat()
+    """Génère un timestamp ISO avec timezone UTC pour cohérence globale"""
+    from datetime import timezone
+    return datetime.now(timezone.utc).isoformat()
 
 def format_error_response(error_type: str, message: str, **kwargs) -> Dict:
     response = {
