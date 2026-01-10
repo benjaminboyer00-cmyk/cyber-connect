@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { LogOut, Search, UserPlus, MessageSquarePlus, Users, Trash2, Shuffle, Bot, Palette, X } from 'lucide-react';
+import { LogOut, Search, UserPlus, MessageSquarePlus, Users, Trash2, Shuffle, Bot, Palette } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -47,9 +47,6 @@ interface SidebarProps {
   onOpenDiscordBots?: () => void;
   onOpenTheme?: () => void;
   onOpenProfile?: () => void;
-  // Mobile responsive
-  isMobileOpen?: boolean;
-  onCloseMobile?: () => void;
 }
 
 export function Sidebar({
@@ -67,9 +64,7 @@ export function Sidebar({
   onUpdateAvatar,
   onOpenDiscordBots,
   onOpenTheme,
-  onOpenProfile,
-  isMobileOpen = false,
-  onCloseMobile,
+  onOpenProfile
 }: SidebarProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
@@ -108,40 +103,11 @@ export function Sidebar({
     return date.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' });
   };
 
-  // Fermer sidebar mobile quand on sélectionne une conversation
-  const handleSelectConversation = (id: string) => {
-    onSelectConversation(id);
-    onCloseMobile?.();
-  };
-
   return (
-    <>
-      {/* Overlay mobile */}
-      {isMobileOpen && (
-        <div 
-          className="fixed inset-0 bg-black/50 z-40 md:hidden"
-          onClick={onCloseMobile}
-        />
-      )}
-      
-      <div className={`
-        w-80 h-full bg-sidebar border-r border-sidebar-border flex flex-col
-        fixed md:relative z-50
-        transition-transform duration-300 ease-in-out
-        ${isMobileOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}
-      `}>
-        {/* Header */}
-        <div className="p-4 border-b border-sidebar-border">
-          <div className="flex items-center justify-between mb-4">
-            {/* Bouton fermer mobile */}
-            <Button
-              variant="ghost"
-              size="icon"
-              className="md:hidden absolute top-2 right-2"
-              onClick={onCloseMobile}
-            >
-              <X className="w-5 h-5" />
-            </Button>
+    <div className="w-80 h-full bg-sidebar border-r border-sidebar-border flex flex-col">
+      {/* Header */}
+      <div className="p-4 border-b border-sidebar-border">
+        <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-3">
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -293,7 +259,7 @@ export function Sidebar({
                         ? 'bg-sidebar-accent border border-primary/30' 
                         : 'hover:bg-sidebar-accent/50'
                     }`}
-                    onClick={() => handleSelectConversation(conv.id)}
+                    onClick={() => onSelectConversation(conv.id)}
                   >
                     <div className="relative">
                       <Avatar className="w-12 h-12">
@@ -377,7 +343,6 @@ export function Sidebar({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-      </div>
-    </>
+    </div>
   );
 }
