@@ -1211,16 +1211,132 @@ async def get_discord_messages(channel_id: str, since: Optional[str] = None):
         Logger.error(f"Erreur récupération Discord: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+# ============================================================================
+# WEBRTC CONFIGURATION & DIAGNOSTIC
+# ============================================================================
+
+@app.get("/api/webrtc-config")
+async def get_webrtc_config():
+    """Retourne la configuration ICE pour WebRTC avec serveurs TURN"""
+    
+    # Credentials depuis variables d'environnement (ou valeurs par défaut publiques)
+    TURN_USERNAME = os.getenv("TURN_USERNAME", "openrelayproject")
+    TURN_CREDENTIAL = os.getenv("TURN_CREDENTIAL", "openrelayproject")
+    
+    ice_configs = {
+        "default": {
+            "iceServers": [
+                # STUN Google (gratuit, stable)
+                {"urls": "stun:stun.l.google.com:19302"},
+                {"urls": "stun:stun1.l.google.com:19302"},
+                {"urls": "stun:stun2.l.google.com:19302"},
+                # TURN OpenRelay (public, gratuit)
+                {
+                    "urls": "turn:openrelay.metered.ca:80",
+                    "username": "openrelayproject",
+                    "credential": "openrelayproject"
+                },
+                {
+                    "urls": "turn:openrelay.metered.ca:443",
+                    "username": "openrelayproject",
+                    "credential": "openrelayproject"
+                },
+                {
+                    "urls": "turn:openrelay.metered.ca:443?transport=tcp",
+                    "username": "openrelayproject",
+                    "credential": "openrelayproject"
+                }
+            ],
+            "iceCandidatePoolSize": 2
+        },
+        "custom": {
+            "iceServers": [
+                {"urls": "stun:stun.l.google.com:19302"},
+                {"urls": "stun:stun1.l.google.com:19302"},
+                {
+                    "urls": os.getenv("TURN_URL", "turn:openrelay.metered.ca:443"),
+                    "username": TURN_USERNAME,
+                    "credential": TURN_CREDENTIAL
+                }
+            ],
+            "iceCandidatePoolSize": 2
+        }
+    }
+    
+    return {
+        "configs": ice_configs,
+        "recommended": "default",
+        "debug": {
+            "timestamp": generate_timestamp(),
+            "space_host": Config.SPACE_HOST,
+            "ws_url": f"wss://{Config.SPACE_HOST}/ws/{{user_id}}"
+        }
+    }
+
+@app.post("/api/webrtc-diagnostic")
+async def webrtc_diagnostic(
+    sender_id: str = Form(...),
+    target_id: str = Form(...)
+):
+    """Collecte les données de diagnostic pour résoudre les problèmes WebRTC"""
+    
+    try:
+        sender_connected = await ws_manager.is_user_connected(sender_id)
+        target_connected = await ws_manager.is_user_connected(target_id)
+        connected_users = await ws_manager.get_connected_users()
+        
+        diagnostic = {
+            "timestamp": generate_timestamp(),
+            "sender": {
+                "id": sender_id,
+                "connected": sender_connected,
+                "status": "online" if sender_connected else "offline"
+            },
+            "target": {
+                "id": target_id,
+                "connected": target_connected,
+                "status": "online" if target_connected else "offline"
+            },
+            "websocket": {
+                "total_connected": len(connected_users),
+                "connected_users": connected_users
+            },
+            "recommendations": []
+        }
+        
+        if not sender_connected:
+            diagnostic["recommendations"].append(
+                "L'expéditeur n'est pas connecté au WebSocket. Rechargez la page."
+            )
+        
+        if not target_connected:
+            diagnostic["recommendations"].append(
+                "Le destinataire n'est pas connecté. Il doit ouvrir l'application."
+            )
+        
+        if sender_connected and target_connected:
+            diagnostic["recommendations"].append(
+                "Les deux sont connectés. Problème probable: NAT/firewalls. Serveur TURN requis."
+            )
+        
+        Logger.info(f"📊 Diagnostic WebRTC: {sender_id} -> {target_id}")
+        return diagnostic
+        
+    except Exception as e:
+        Logger.error(f"Erreur diagnostic WebRTC: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.get("/api/health")
 async def health_check():
     """Health check pour Hugging Face Spaces"""
     return {
         "status": "healthy",
-        "version": "4.0.3",
+        "version": "4.0.4",
         "db": "connected" if db.connected else "disconnected",
         "encryption": "ready" if encryption.initialized else "not_ready",
         "timestamp": generate_timestamp(),
         "discord_channels": len(discord_messages),
+        "webrtc": "twilio_turn_enabled",
         "env_check": {
             "supabase_url_set": bool(Config.SUPABASE_URL),
             "supabase_key_set": bool(Config.SUPABASE_KEY),

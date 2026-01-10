@@ -209,13 +209,14 @@ export const useWebRTC = (
   const createPeerConnection = useCallback((targetId: string) => {
     console.log('🔧 Création PeerConnection vers', targetId);
     
+    // Configuration ICE avec serveurs TURN publics (pour traverser NAT/firewalls)
     const pc = new RTCPeerConnection({
       iceServers: [
-        // STUN Google (gratuit, très stable)
+        // STUN Google (gratuit, stable)
         { urls: 'stun:stun.l.google.com:19302' },
         { urls: 'stun:stun1.l.google.com:19302' },
         { urls: 'stun:stun2.l.google.com:19302' },
-        // TURN OpenRelay (gratuit, public)
+        // TURN OpenRelay (public, gratuit)
         {
           urls: 'turn:openrelay.metered.ca:80',
           username: 'openrelayproject',
