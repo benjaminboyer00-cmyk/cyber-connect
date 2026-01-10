@@ -493,7 +493,14 @@ export const useWebRTC = (
       isRemoteDescriptionSet.current = false;
       pendingCandidatesQueue.current = [];
 
-      // 3. Ajouter les tracks
+      // 3. Ajouter les transceivers bidirectionnels AVANT addTrack
+      // Ceci garantit que l'offre demande de recevoir audio/video
+      pc.addTransceiver('audio', { direction: 'sendrecv' });
+      if (type === 'video') {
+        pc.addTransceiver('video', { direction: 'sendrecv' });
+      }
+
+      // 4. Ajouter les tracks locaux
       if (localStreamRef.current) {
         localStreamRef.current.getTracks().forEach(track => {
           console.log(`📤 CALLER: Ajout track ${track.kind}`);
@@ -501,7 +508,7 @@ export const useWebRTC = (
         });
       }
 
-      // 4. Créer et envoyer l'offre
+      // 5. Créer et envoyer l'offre
       const offer = await pc.createOffer({
         offerToReceiveAudio: true,
         offerToReceiveVideo: type === 'video'
@@ -560,9 +567,28 @@ export const useWebRTC = (
       if (localStreamRef.current) {
         const tracks = localStreamRef.current.getTracks();
         console.log(`📤 CALLEE: Ajout de ${tracks.length} tracks locaux AVANT answer`);
+        
+        // Récupérer les transceivers existants de l'offre
+        const transceivers = pc.getTransceivers();
+        console.log('📡 Transceivers de l\'offre:', transceivers.length);
+        
         tracks.forEach(track => {
           console.log(`📤 Ajout track: ${track.kind}, enabled=${track.enabled}`);
-          pc.addTrack(track, localStreamRef.current!);
+          
+          // Trouver le transceiver correspondant et y attacher notre track
+          const transceiver = transceivers.find(t => 
+            t.receiver.track?.kind === track.kind && !t.sender.track
+          );
+          
+          if (transceiver) {
+            transceiver.sender.replaceTrack(track);
+            transceiver.direction = 'sendrecv';
+            console.log(`✅ Track ${track.kind} attaché au transceiver existant`);
+          } else {
+            // Sinon, ajouter normalement
+            pc.addTrack(track, localStreamRef.current!);
+            console.log(`✅ Track ${track.kind} ajouté via addTrack`);
+          }
         });
       } else {
         console.error('❌ CALLEE: PAS DE STREAM LOCAL!');
