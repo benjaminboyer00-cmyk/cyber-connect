@@ -204,7 +204,9 @@ export default function Index() {
 
   return (
     <div className="dark min-h-screen h-screen bg-background flex overflow-hidden">
-      <Sidebar
+      {/* Sidebar - cachée sur mobile quand une conversation est sélectionnée */}
+      <div className={`${selectedConversation ? 'hidden md:block' : 'block'}`}>
+        <Sidebar
         profile={profile}
         conversations={conversations}
         pendingRequests={pendingRequests}
@@ -224,9 +226,13 @@ export default function Index() {
         onOpenProfile={() => setProfileModalOpen(true)}
         isMobileOpen={sidebarOpen}
         onCloseMobile={() => setSidebarOpen(false)}
-      />
+        />
+      </div>
       
-      <ChatArea
+      {/* ChatArea - cachée sur mobile quand pas de conversation, avec bouton retour */}
+      <div className={`flex-1 ${selectedConversation ? 'block' : 'hidden md:block'}`}>
+        <ChatArea
+          onBack={() => setSelectedConversation(null)}
         contact={contact}
         messages={messages}
         currentUserId={user.id}
@@ -255,7 +261,8 @@ export default function Index() {
         chatBackground={chatBackground}
         onSetChatBackground={(url) => setConversationBackground(url)}
         onClearChatBackground={clearBackground}
-      />
+        />
+      </div>
 
       {/* Modal appel entrant */}
       <IncomingCallModal
