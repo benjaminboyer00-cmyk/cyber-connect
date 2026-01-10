@@ -248,14 +248,12 @@ export default function Index() {
         onReaction={addReaction}
         getReactionCounts={getReactionCounts}
         hasUserReacted={hasUserReacted}
-        pinnedMessages={pinnedMessages}
         isMessagePinned={isMessagePinned}
         onPinMessage={pinMessage}
         onUnpinMessage={unpinMessage}
         chatBackground={chatBackground}
         onSetChatBackground={(url) => setConversationBackground(url)}
         onClearChatBackground={clearBackground}
-        onOpenSidebar={() => setSidebarOpen(true)}
       />
 
       {/* Modal appel entrant */}
