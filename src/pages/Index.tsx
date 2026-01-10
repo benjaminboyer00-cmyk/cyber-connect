@@ -205,7 +205,7 @@ export default function Index() {
   return (
     <div className="dark min-h-screen h-screen bg-background flex overflow-hidden">
       {/* Sidebar - cachée sur mobile quand une conversation est sélectionnée */}
-      <div className={`${selectedConversation ? 'hidden md:block' : 'block'}`}>
+      <div className={`h-full ${selectedConversation ? 'hidden md:block' : 'block'}`}>
         <Sidebar
         profile={profile}
         conversations={conversations}
@@ -230,7 +230,7 @@ export default function Index() {
       </div>
       
       {/* ChatArea - cachée sur mobile quand pas de conversation, avec bouton retour */}
-      <div className={`flex-1 ${selectedConversation ? 'block' : 'hidden md:block'}`}>
+      <div className={`flex-1 h-full ${selectedConversation ? 'block' : 'hidden md:block'}`}>
         <ChatArea
           onBack={() => setSelectedConversation(null)}
         contact={contact}
