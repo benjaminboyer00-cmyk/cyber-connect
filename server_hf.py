@@ -32,10 +32,15 @@ from deep_translator import GoogleTranslator
 # ============================================================================
 
 class Config:
-    """Configuration de production"""
-    SUPABASE_URL = os.environ.get("SUPABASE_URL", "").strip()
-    SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "").strip()
-    ENCRYPTION_KEY = os.environ.get("ENCRYPTION_KEY", "").strip()
+    """Configuration de production - Optimisé Hugging Face Spaces"""
+    # Variables d'environnement compatibles Spaces
+    SUPABASE_URL = os.getenv("SUPABASE_URL") or os.environ.get("SUPABASE_URL", "").strip()
+    SUPABASE_KEY = os.getenv("SUPABASE_ANON_KEY") or os.getenv("SUPABASE_SERVICE_ROLE_KEY") or os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "").strip()
+    ENCRYPTION_KEY = os.getenv("ENCRYPTION_KEY") or os.environ.get("ENCRYPTION_KEY", "").strip()
+    
+    # Port spécifique à Hugging Face
+    PORT = int(os.getenv("PORT", 7860))
+    SPACE_HOST = os.getenv("SPACE_HOST", "localhost")
     
     WS_HEARTBEAT_INTERVAL = 20
     WS_INACTIVITY_TIMEOUT = 90
@@ -43,7 +48,7 @@ class Config:
     WS_CONNECTION_TIMEOUT = 300
     
     LOG_LEVEL = "INFO"
-    DEBUG_MODE = os.environ.get("DEBUG", "false").lower() == "true"
+    DEBUG_MODE = os.getenv("DEBUG", "false").lower() == "true"
 
 # ============================================================================
 # INITIALISATION FASTAPI
@@ -57,9 +62,20 @@ app = FastAPI(
     redoc_url="/redoc" if Config.DEBUG_MODE else None
 )
 
+# CORS optimisé pour frontend multi-environnement
+frontend_origins = [
+    "http://localhost:3000",
+    "http://localhost:5173",
+    "http://localhost:8080",
+    "https://*.hf.space",
+    "https://*.vercel.app",
+    "https://*.netlify.app",
+    "*"  # Fallback permissif pour dev
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=frontend_origins,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
@@ -1045,6 +1061,51 @@ async def maintenance_task():
             Logger.error("Erreur maintenance", e)
 
 # ============================================================================
+# ROUTES DEBUG & TEST WEBRTC (Hugging Face Spaces)
+# ============================================================================
+
+@app.get("/api/webrtc-test")
+async def webrtc_test():
+    """Endpoint pour tester la connectivité WebRTC"""
+    space_host = Config.SPACE_HOST
+    protocol = "wss" if space_host != "localhost" else "ws"
+    
+    return {
+        "status": "ready",
+        "websocket_url": f"{protocol}://{space_host}/ws/{{user_id}}",
+        "heartbeat_url": f"{protocol}://{space_host}/ws/heartbeat",
+        "ice_servers": [
+            {"urls": "stun:stun.l.google.com:19302"},
+            {"urls": "stun:stun1.l.google.com:19302"},
+        ],
+        "timestamp": generate_timestamp()
+    }
+
+@app.get("/api/debug/connections")
+async def debug_connections():
+    """Debug des connexions WebSocket actives"""
+    metrics = await ws_manager.get_metrics()
+    return {
+        "active": metrics["active_connections"],
+        "users": await ws_manager.get_connected_users(),
+        "pending_chunks": len(pending_chunks),
+        "user_presence": dict(user_presence),
+        "db_connected": db.connected,
+        "encryption_ready": encryption.initialized
+    }
+
+@app.get("/api/health")
+async def health_check():
+    """Health check pour Hugging Face Spaces"""
+    return {
+        "status": "healthy",
+        "version": "4.0.2",
+        "db": "connected" if db.connected else "disconnected",
+        "encryption": "ready" if encryption.initialized else "not_ready",
+        "timestamp": generate_timestamp()
+    }
+
+# ============================================================================
 # STARTUP & SHUTDOWN
 # ============================================================================
 
@@ -1059,6 +1120,7 @@ async def startup_event():
     Logger.success(f"💓 WebSocket Heartbeat: /ws/heartbeat")
     Logger.success(f"🔐 Chiffrement: {'✅' if encryption.initialized else '❌'}")
     Logger.success(f"🗄️  Base de données: {'✅' if db.connected else '❌'}")
+    Logger.success(f"🌐 Space Host: {Config.SPACE_HOST}")
     Logger.success("=" * 60)
 
 @app.on_event("shutdown")

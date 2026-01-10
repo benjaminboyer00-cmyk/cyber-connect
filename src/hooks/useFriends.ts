@@ -82,13 +82,13 @@ export function useFriends(userId: string | undefined) {
   }, [fetchFriends]);
 
   /**
-   * Real-time subscription pour les changements sur la table friends
+   * Real-time subscription pour les changements sur la table friends ET profiles
    * Rafraîchit automatiquement la liste dès qu'une ligne est modifiée
    */
   useEffect(() => {
     if (!userId) return;
 
-    console.log('[useFriends] 📡 Abonnement Realtime sur table friends');
+    console.log('[useFriends] 📡 Abonnement Realtime sur tables friends + profiles');
 
     const channel = supabase
       .channel('friends-realtime')
@@ -102,7 +102,7 @@ export function useFriends(userId: string | undefined) {
           filter: `friend_id=eq.${userId}`
         },
         (payload) => {
-          console.log('[useFriends] 📨 Changement détecté (friend_id):', payload.eventType);
+          console.log('[useFriends] 📨 Changement friends (friend_id):', payload.eventType);
           fetchFriends();
         }
       )
@@ -116,8 +116,27 @@ export function useFriends(userId: string | undefined) {
           filter: `user_id=eq.${userId}`
         },
         (payload) => {
-          console.log('[useFriends] 📨 Changement détecté (user_id):', payload.eventType);
+          console.log('[useFriends] 📨 Changement friends (user_id):', payload.eventType);
           fetchFriends();
+        }
+      )
+      // Écouter les changements de profils (pour les pastilles de présence)
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'profiles'
+        },
+        (payload) => {
+          console.log('[useFriends] 🟢 Changement profil détecté:', payload.new);
+          // Mettre à jour le statut du profil localement sans refetch complet
+          setFriends(prev => prev.map(f => {
+            if (f.profile?.id === (payload.new as any)?.id) {
+              return { ...f, profile: { ...f.profile, ...(payload.new as any) } };
+            }
+            return f;
+          }));
         }
       )
       .subscribe((status) => {

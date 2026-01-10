@@ -1,12 +1,12 @@
 /**
  * Hook WebRTC pour les appels audio/vidéo
  * 
- * CORRECTIFS APPLIQUÉS:
- * - cleanupLocalResources() séparé de endCall() - N'ENVOIE PAS de signal
- * - endCall() envoie le signal SEULEMENT sur action utilisateur explicite
- * - isCallerRef pour éviter les race conditions
- * - pendingCandidatesQueue vidée immédiatement après setRemoteDescription
- * - Configuration TURN Metered.ca (ports 80, 443, UDP et TCP)
+ * CORRECTIFS APPLIQUÉS (Fix One-Way Audio):
+ * - Logic déplacée : capture média et création PC dans acceptCall()
+ * - case 'offer' : stocke uniquement l'offre et sonne (pas de média, pas de PC)
+ * - acceptCall() : capture flux -> crée PC -> ajoute tracks -> setRemote -> createAnswer
+ * - Gestion file d'attente ICE améliorée pour le mode 'ringing'
+ * - Timeout d'expiration pour offre en attente
  */
 
 import { useState, useEffect, useRef, useCallback } from 'react';
@@ -45,6 +45,10 @@ export const useWebRTC = (
   const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
 
+  // FIX ONE-WAY AUDIO: Stockage de l'offre en attente
+  const pendingOfferRef = useRef<RTCSessionDescriptionInit | null>(null);
+  const pendingOfferTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
   // File d'attente ICE candidates
   const pendingCandidatesQueue = useRef<RTCIceCandidateInit[]>([]);
   const isRemoteDescriptionSet = useRef<boolean>(false);
@@ -62,46 +66,22 @@ export const useWebRTC = (
    */
   const handleCallError = useCallback((error: Error, context: string) => {
     console.error(`❌ WebRTC Error [${context}]:`, error);
-    
-    // Réinitialiser les ressources
-    if (localStreamRef.current) {
-      localStreamRef.current.getTracks().forEach(track => track.stop());
-      localStreamRef.current = null;
-    }
-    
-    if (peerConnectionRef.current) {
-      peerConnectionRef.current.close();
-      peerConnectionRef.current = null;
-    }
-    
-    // Notifier l'utilisateur
-    toast.error(`Call failed: ${error.message}`);
-    
-    // Réinitialiser l'état
-    setCallState('failed');
-    setRemoteStream(null);
-    
+    toast.error(`Appel échoué: ${error.message}`);
     return error;
   }, []);
 
-  // Accès caméra/micro selon le type d'appel avec vérification des devices
+  /**
+   * Accès caméra/micro selon le type d'appel
+   */
   const initializeLocalStream = useCallback(async (type: CallType): Promise<boolean> => {
     try {
       console.log(`📹 Initialisation média pour: ${type}`);
       
-      // D'abord lister les devices disponibles
-      try {
-        const devices = await navigator.mediaDevices.enumerateDevices();
-        console.log('📋 Devices disponibles:', devices.map(d => `${d.kind}: ${d.label || 'non nommé'}`));
-      } catch (deviceError) {
-        console.warn('⚠️ Impossible de lister les devices:', deviceError);
-      }
-      
-      // Constraintes flexibles
       const constraints: MediaStreamConstraints = {
-        audio: type !== 'video' ? true : {
+        audio: {
           echoCancellation: true,
-          noiseSuppression: true
+          noiseSuppression: true,
+          autoGainControl: true
         },
         video: type === 'video' ? {
           width: { ideal: 640 },
@@ -109,8 +89,6 @@ export const useWebRTC = (
           facingMode: 'user'
         } : false
       };
-      
-      console.log('🎯 Contraintes:', constraints);
       
       const stream = await navigator.mediaDevices.getUserMedia(constraints);
       localStreamRef.current = stream;
@@ -125,36 +103,36 @@ export const useWebRTC = (
     } catch (error) {
       console.error('❌ Erreur média:', error);
       
-      // Fallback: essayer sans vidéo si c'était un appel vidéo
+      // Fallback audio si la vidéo échoue
       if (type === 'video') {
-        console.log('🔄 Fallback: essai audio seul...');
         try {
+          console.log('🔄 Fallback: audio seul...');
           const audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
           localStreamRef.current = audioStream;
           setLocalStream(audioStream);
-          console.log('✅ Stream audio obtenu en fallback');
           return true;
         } catch (audioError) {
           console.error('❌ Échec fallback audio:', audioError);
         }
       }
-      
-      setCallState('failed');
       return false;
     }
   }, []);
 
   /**
    * Nettoyage des ressources locales SANS envoyer de signal
-   * Cette fonction est stable (pas de dépendances variables)
    */
   const cleanupLocalResources = useCallback(() => {
     console.log('🧹 Nettoyage ressources locales...');
 
-    // Annuler le timeout de déconnexion
+    // Annuler les timeouts
     if (disconnectTimeoutRef.current) {
       clearTimeout(disconnectTimeoutRef.current);
       disconnectTimeoutRef.current = null;
+    }
+    if (pendingOfferTimeoutRef.current) {
+      clearTimeout(pendingOfferTimeoutRef.current);
+      pendingOfferTimeoutRef.current = null;
     }
 
     // Fermer la connexion peer
@@ -180,38 +158,34 @@ export const useWebRTC = (
     currentCallRef.current = { targetId: null, callerId: null };
     isRemoteDescriptionSet.current = false;
     pendingCandidatesQueue.current = [];
+    pendingOfferRef.current = null;
     isCallerRef.current = false;
     callTypeRef.current = 'video';
   }, []);
 
   /**
-   * Fin d'appel.
-   * @param userInitiated - Doit être explicitement `true` pour envoyer le signal call-ended.
+   * Fin d'appel avec signal optionnel
    */
   const endCall = useCallback((userInitiated = false) => {
     if (userInitiated) {
       console.log('🛑 Fin d\'appel (action utilisateur)');
-
-      // Envoyer le signal de fin AVANT de nettoyer
       if (currentCallRef.current.targetId && signaling) {
         signaling.sendSignal(currentCallRef.current.targetId, 'call-ended');
       } else if (currentCallRef.current.callerId && signaling) {
         signaling.sendSignal(currentCallRef.current.callerId, 'call-ended');
       }
     }
-
-    // Toujours nettoyer les ressources (SANS envoyer de signal)
     cleanupLocalResources();
   }, [signaling, cleanupLocalResources]);
 
   /**
-   * Vidage immédiat de la file d'attente ICE après setRemoteDescription
+   * Vidage immédiat de la file d'attente ICE
    */
   const processPendingCandidates = useCallback(async () => {
     if (!peerConnectionRef.current) return;
 
     const candidates = [...pendingCandidatesQueue.current];
-    pendingCandidatesQueue.current = []; // Vider immédiatement
+    pendingCandidatesQueue.current = [];
 
     console.log(`🔄 Traitement ${candidates.length} ICE en attente`);
 
@@ -220,96 +194,70 @@ export const useWebRTC = (
         await peerConnectionRef.current.addIceCandidate(new RTCIceCandidate(candidate));
         console.log('✅ ICE ajouté depuis file');
       } catch (e) {
-        console.error('❌ Erreur ICE delayed:', e);
+        // Ignorer les erreurs d'ufrag obsolète
+        const errMsg = String(e);
+        if (!errMsg.includes('ufrag')) {
+          console.error('❌ Erreur ICE delayed:', e);
+        }
       }
     }
   }, []);
 
   /**
-   * Création PeerConnection avec configuration TURN Metered.ca
+   * Création PeerConnection avec serveurs ICE
    */
   const createPeerConnection = useCallback((targetId: string) => {
     console.log('🔧 Création PeerConnection vers', targetId);
     
-    // Configuration ICE - STUN seulement pour éviter les TURN instables
-    // TURN gratuits publics sont instables - à remplacer par un service payant en production
     const pc = new RTCPeerConnection({
       iceServers: [
         // STUN Google (gratuit, très stable)
         { urls: 'stun:stun.l.google.com:19302' },
         { urls: 'stun:stun1.l.google.com:19302' },
-        { urls: 'stun:stun2.l.google.com:19302' },
-        { urls: 'stun:stun3.l.google.com:19302' }
+        // TURN Metered.ca (credentials de l'utilisateur)
+        {
+          urls: 'turn:standard.relay.metered.ca:80',
+          username: '2ce8447dffad525621446d76',
+          credential: 'vQ4YEJGIKoc9MmTx'
+        },
+        {
+          urls: 'turn:standard.relay.metered.ca:443',
+          username: '2ce8447dffad525621446d76',
+          credential: 'vQ4YEJGIKoc9MmTx'
+        },
+        {
+          urls: 'turns:standard.relay.metered.ca:443?transport=tcp',
+          username: '2ce8447dffad525621446d76',
+          credential: 'vQ4YEJGIKoc9MmTx'
+        }
       ],
-      iceCandidatePoolSize: 4,
+      iceCandidatePoolSize: 2,
       iceTransportPolicy: 'all' as RTCIceTransportPolicy
     });
 
     pc.onicegatheringstatechange = () => {
       console.log('🧊 ICE gathering state:', pc.iceGatheringState);
     };
-    
-    pc.onicecandidateerror = (event: any) => {
-      console.error('🧊❌ ICE candidate error:', {
-        errorCode: event?.errorCode,
-        errorText: event?.errorText,
-        url: event?.url,
-      });
-    };
-
-    pc.onconnectionstatechange = () => {
-      if (pc.connectionState === 'failed') {
-        console.warn('🔗 connectionState failed');
-      }
-    };
 
     pc.onicecandidate = (event) => {
       if (event.candidate && signaling) {
-        // Log le type de candidat pour debug TURN
         const candidateType = event.candidate.type || 'unknown';
-        const protocol = event.candidate.protocol || 'unknown';
-        console.log(`🧊 ICE candidate: type=${candidateType}, protocol=${protocol}, address=${event.candidate.address || 'hidden'}`);
+        console.log(`🧊 ICE candidate: type=${candidateType}`);
         signaling.sendSignal(targetId, 'ice-candidate', event.candidate.toJSON());
-      } else if (!event.candidate) {
-        console.log('🧊 ICE gathering complete (null candidate)');
       }
     };
 
     pc.ontrack = (event) => {
-      const trackInfo = {
-        kind: event.track.kind,
-        id: event.track.id,
-        streamId: event.streams[0]?.id || 'no-stream',
-        enabled: event.track.enabled,
-        muted: event.track.muted
-      };
-      console.log('📥 Track distant reçu:', trackInfo);
+      console.log('📥 Track distant reçu:', event.track.kind, 'muted:', event.track.muted);
       
       if (event.streams && event.streams[0]) {
-        // Stream fourni par WebRTC
-        const remoteStreamId = event.streams[0].id;
-        const localStreamId = localStreamRef.current?.id;
-        
-        if (remoteStreamId === localStreamId) {
-          console.warn('⚠️ ATTENTION: Le stream distant a le même ID que le local!');
-        } else {
-          console.log('✅ Stream distant différent du local:', { remoteStreamId, localStreamId });
-        }
-        
         setRemoteStream(event.streams[0]);
       } else {
-        // Pas de stream fourni (cas replaceTrack) - créer un MediaStream manuellement
-        console.log('⚠️ Track sans stream - création manuelle du MediaStream');
+        // Créer un MediaStream si pas fourni
         setRemoteStream(prev => {
           const stream = prev || new MediaStream();
-          // Éviter les doublons
-          const existingTrack = stream.getTracks().find(t => t.kind === event.track.kind);
-          if (existingTrack && existingTrack.id !== event.track.id) {
-            stream.removeTrack(existingTrack);
-          }
           if (!stream.getTracks().find(t => t.id === event.track.id)) {
             stream.addTrack(event.track);
-            console.log(`✅ Track ${event.track.kind} ajouté au stream manuel`);
           }
           return stream;
         });
@@ -319,7 +267,6 @@ export const useWebRTC = (
     pc.oniceconnectionstatechange = () => {
       console.log('🌐 ICE state:', pc.iceConnectionState);
 
-      // Annuler tout timeout précédent
       if (disconnectTimeoutRef.current) {
         clearTimeout(disconnectTimeoutRef.current);
         disconnectTimeoutRef.current = null;
@@ -327,300 +274,168 @@ export const useWebRTC = (
 
       if (['connected', 'completed'].includes(pc.iceConnectionState)) {
         setCallState('connected');
-        
-        // Log des transceivers pour debug
+        // Log transceivers pour debug
         const transceivers = pc.getTransceivers();
         console.log('📡 Transceivers après connexion:', transceivers.map(t => ({
           mid: t.mid,
           direction: t.direction,
-          currentDirection: t.currentDirection,
-          sender: t.sender.track?.kind,
-          receiver: t.receiver.track?.kind
+          senderTrack: t.sender?.track?.kind || 'none',
+          receiverTrack: t.receiver?.track?.kind || 'none'
         })));
-        
-        return;
       }
 
       if (pc.iceConnectionState === 'disconnected') {
-        console.log('⚠️ ICE disconnected - tentative restartIce');
-        try {
-          pc.restartIce();
-        } catch (e) {
-          console.log('⚠️ restartIce indisponible:', e);
-        }
-        return;
+        try { pc.restartIce(); } catch (e) { /* ignore */ }
       }
 
       if (pc.iceConnectionState === 'failed') {
-        console.log('⚠️ ICE failed - attente 3s avant cleanup...');
+        console.log('⚠️ ICE failed - attente 3s...');
         disconnectTimeoutRef.current = setTimeout(() => {
           if (peerConnectionRef.current?.iceConnectionState === 'failed') {
-            console.log('❌ ICE toujours failed après 3s - nettoyage');
+            console.log('❌ ICE définitivement failed');
             cleanupLocalResources();
           }
         }, 3000);
-        return;
-      }
-
-      if (pc.iceConnectionState === 'closed') {
-        console.log('🛑 ICE closed - nettoyage local');
-        cleanupLocalResources();
       }
     };
 
     return pc;
   }, [signaling, cleanupLocalResources]);
 
-  // Gestionnaire signaux WebSocket
+  /**
+   * Gestionnaire signaux WebSocket
+   */
   useEffect(() => {
     if (!signaling) return;
 
     const handleSignalMessage = async (message: any) => {
       if (!message) return;
-      
       const { type, sender_id, payload, data } = message;
-      if (type !== 'ice-candidate') {
-        console.log(`📥 Signal ${type} de ${sender_id}`);
-      }
-
-      // Extraire les données SDP (peut être dans payload ou data.sdp)
-      const signalData = data || {};
+      const signalData = data || payload || {};
       const sdpData = payload || signalData.sdp || signalData;
 
       switch (type) {
         case 'offer':
-          if (callState !== 'idle' && callState !== 'ringing') {
-            console.log('⚠️ Déjà en appel, ignore offre');
+          // FIX ONE-WAY AUDIO: On ne fait QUE stocker l'offre et sonner
+          // Pas de média, pas de PeerConnection ici!
+          console.log('🔔 Offre reçue de', sender_id);
+          
+          if (!sdpData || !sdpData.sdp) {
+            console.error('❌ Offre invalide: pas de SDP');
             return;
           }
 
-          try {
-            console.log('🔍 Analyse offer reçue:', {
-              hasPayload: !!payload,
-              hasData: !!data,
-              hasSdp: !!sdpData,
-              sdpType: sdpData?.type,
-              sdpLength: sdpData?.sdp?.length
-            });
+          // Correction du type SDP si nécessaire
+          if (!sdpData.type || sdpData.type === 'null') {
+            sdpData.type = 'offer';
+          }
 
-            // VALIDATION CRITIQUE
-            if (!sdpData) {
-              console.error('❌ Offer sans SDP');
-              throw new Error('Invalid offer: missing SDP data');
-            }
-
-            // CORRECTION du type si null/undefined
-            if (!sdpData.type || sdpData.type === 'null' || sdpData.type === null) {
-              console.warn('⚠️ Type SDP invalide, correction à "offer"');
-              sdpData.type = 'offer';
-            }
-
-            // VÉRIFICATION finale
-            if (sdpData.type !== 'offer') {
-              console.error(`❌ Type SDP incorrect: ${sdpData.type}, attendu: offer`);
-              sdpData.type = 'offer'; // Correction forcée
-            }
-
-            console.log('✅ Offer validée, traitement...');
-
-            setCallState('ringing');
-            currentCallRef.current = { targetId: sender_id, callerId: sender_id };
-            setIsCaller(false);
-            isCallerRef.current = false;
-            
-            // Extraire le callType depuis l'offer (envoyé par l'appelant)
-            const incomingType: CallType = (payload?.callType === 'audio' || sdpData?.callType === 'audio') ? 'audio' : 'video';
-            console.log('📞 Type d\'appel reçu:', incomingType);
-            callTypeRef.current = incomingType;
-            setCallType(incomingType);
-
-            await initializeLocalStream(incomingType);
-
-            const pc = createPeerConnection(sender_id);
-            peerConnectionRef.current = pc;
-            isRemoteDescriptionSet.current = false;
-            pendingCandidatesQueue.current = [];
-
-            // Ajouter les tracks AVANT setRemoteDescription pour qu'ils soient dans l'answer
-            if (localStreamRef.current) {
-              const tracks = localStreamRef.current.getTracks();
-              console.log(`📤 CALLEE: Ajout de ${tracks.length} tracks locaux`);
-              tracks.forEach(track => {
-                console.log(`📤 Ajout track local: ${track.kind}, enabled=${track.enabled}, muted=${track.muted}`);
-                pc.addTrack(track, localStreamRef.current!);
-              });
-            } else {
-              console.error('❌ CALLEE: PAS DE STREAM LOCAL - l\'autre ne m\'entendra pas!');
-            }
-
-            // Puis setRemoteDescription
-            await pc.setRemoteDescription(new RTCSessionDescription(sdpData));
-            isRemoteDescriptionSet.current = true;
-
-            // Log les transceivers pour debug
-            const transceivers = pc.getTransceivers();
-            console.log('📡 Transceivers après setup:', transceivers.map(t => ({
-              mid: t.mid,
-              direction: t.direction,
-              currentDirection: t.currentDirection,
-              senderTrack: t.sender?.track?.kind || 'none',
-              receiverTrack: t.receiver?.track?.kind || 'none'
-            })));
-
-            // Vider immédiatement la file d'attente ICE
-            await processPendingCandidates();
-            console.log('🔔 Appel entrant prêt - en attente acceptation');
-
-          } catch (error) {
-            const err = error instanceof Error ? error : new Error(String(error));
-            handleCallError(err, 'offer processing');
+          // Reset si nécessaire
+          if (callState !== 'idle') {
             cleanupLocalResources();
           }
+
+          // Déterminer le type d'appel
+          const incomingType: CallType = (payload?.callType === 'audio' || sdpData?.callType === 'audio') ? 'audio' : 'video';
+          console.log('📞 Type d\'appel entrant:', incomingType);
+
+          // STOCKER L'OFFRE (sera traitée dans acceptCall)
+          pendingOfferRef.current = sdpData;
+          
+          // Timeout d'expiration de l'offre (60s)
+          if (pendingOfferTimeoutRef.current) {
+            clearTimeout(pendingOfferTimeoutRef.current);
+          }
+          pendingOfferTimeoutRef.current = setTimeout(() => {
+            if (pendingOfferRef.current) {
+              console.log('🕒 Offre expirée');
+              pendingOfferRef.current = null;
+              if (callState === 'ringing') {
+                cleanupLocalResources();
+              }
+            }
+          }, 60000);
+
+          // Mettre à jour l'état pour faire sonner
+          currentCallRef.current = { targetId: sender_id, callerId: sender_id };
+          setCallType(incomingType);
+          callTypeRef.current = incomingType;
+          setIsCaller(false);
+          isCallerRef.current = false;
+          setCallState('ringing');
           break;
 
         case 'answer':
-          // Utiliser isCallerRef au lieu de callState (évite race condition)
           if (!isCallerRef.current || !peerConnectionRef.current) {
-            console.log('⚠️ Pas en appel sortant (isCallerRef:', isCallerRef.current, ')');
+            console.log('⚠️ Answer ignorée: pas d\'appel sortant');
             return;
           }
+          
+          console.log('✅ Answer reçue de', sender_id);
 
           try {
-            // Extraire les données SDP pour answer aussi
-            const answerData = payload || signalData.sdp || signalData;
+            // Correction du type SDP
+            if (!sdpData.type || sdpData.type === 'null') {
+              sdpData.type = 'answer';
+            }
 
-            // VALIDATION du SDP avant utilisation
-            console.log('📥 Réception answer de', sender_id);
-            
-            // VALIDER que l'answer a un type valide
-            if (!answerData || typeof answerData !== 'object') {
-              console.error('❌ Answer invalide: payload manquant ou incorrect', answerData);
-              throw new Error('Invalid answer: missing or incorrect payload');
-            }
-            
-            // CORRECTION du type si null/undefined
-            if (!answerData.type || answerData.type === 'null' || answerData.type === null) {
-              console.warn('⚠️ Type SDP invalide pour answer, correction à "answer"');
-              answerData.type = 'answer';
-            }
-            
-            // VÉRIFIER le type SDP
-            if (!['offer', 'answer', 'pranswer', 'rollback'].includes(answerData.type)) {
-              console.error('❌ Type SDP invalide:', answerData.type);
-              answerData.type = 'answer';
-              console.log('🔧 Type SDP corrigé à "answer"');
-            }
-            
-            console.log('✅ Answer validée:', {
-              type: answerData.type,
-              hasSdp: !!answerData.sdp,
-              sdpLength: answerData.sdp?.length || 0
-            });
-
-            await peerConnectionRef.current.setRemoteDescription(new RTCSessionDescription(answerData));
+            await peerConnectionRef.current.setRemoteDescription(new RTCSessionDescription(sdpData));
             isRemoteDescriptionSet.current = true;
             
-            // Log transceivers après answer pour debug
+            // Traiter les ICE en attente
+            await processPendingCandidates();
+            
+            // Vérifier les transceivers
             const transceivers = peerConnectionRef.current.getTransceivers();
             console.log('📡 CALLER Transceivers après answer:', transceivers.map(t => ({
               mid: t.mid,
               direction: t.direction,
-              currentDirection: t.currentDirection,
               senderTrack: t.sender?.track?.kind || 'none',
-              senderEnabled: t.sender?.track?.enabled,
               receiverTrack: t.receiver?.track?.kind || 'none',
-              receiverEnabled: t.receiver?.track?.enabled,
               receiverMuted: t.receiver?.track?.muted
             })));
-            
-            // Vérifier si on a bien un receiver track pour l'audio
-            const audioTransceiver = transceivers.find(t => t.receiver?.track?.kind === 'audio');
-            if (audioTransceiver?.receiver?.track) {
-              console.log('🔊 CALLER: Audio receiver track trouvé, muted:', audioTransceiver.receiver.track.muted);
-            } else {
-              console.error('❌ CALLER: PAS de receiver audio track!');
-            }
-            
-            // Vider immédiatement la file d'attente ICE
-            await processPendingCandidates();
-            
-            // IMPORTANT: Le caller doit passer en 'connected' après avoir reçu l'answer
+
             setCallState('connected');
-            console.log('✅ Réponse traitée - Appel connecté');
-            
-            // Note: L'answer est créée dans acceptCall, pas ici
-          } catch (error) {
-            const err = error instanceof Error ? error : new Error(String(error));
-            handleCallError(err, 'answer processing');
-            cleanupLocalResources();
+            console.log('✅ Appel connecté (caller)');
+          } catch (err) {
+            console.error('❌ Erreur traitement answer:', err);
+            handleCallError(err instanceof Error ? err : new Error(String(err)), 'answer');
           }
           break;
 
         case 'ice-candidate':
-          try {
-            if (isRemoteDescriptionSet.current && peerConnectionRef.current) {
-              // Vérifier que le PC est dans un état valide
-              const pcState = peerConnectionRef.current.signalingState;
-              if (pcState === 'closed') {
-                console.log('⚠️ ICE ignoré: PeerConnection fermé');
-                break;
-              }
+          // Toujours accepter les ICE, même en ringing (on les queue)
+          if (peerConnectionRef.current && isRemoteDescriptionSet.current) {
+            try {
               await peerConnectionRef.current.addIceCandidate(new RTCIceCandidate(payload));
-            } else if (peerConnectionRef.current) {
-              pendingCandidatesQueue.current.push(payload);
-              console.log('📦 ICE mis en file (remoteDesc pas encore set)');
-            } else {
-              // Pas de PeerConnection - ignorer silencieusement (ancien appel)
-              console.log('⚠️ ICE ignoré: pas de PeerConnection actif');
+            } catch (e) {
+              const errMsg = String(e);
+              if (!errMsg.includes('ufrag')) {
+                console.error('❌ Erreur ICE:', e);
+              }
             }
-          } catch (error) {
-            // Ignorer les erreurs "Unknown ufrag" - normales entre appels
-            const errMsg = String(error);
-            if (errMsg.includes('Unknown ufrag') || errMsg.includes('unknown ufrag')) {
-              console.log('⚠️ ICE ignoré: ufrag obsolète (ancien appel)');
-            } else {
-              console.error('❌ Erreur ICE:', error);
-            }
+          } else {
+            // En ringing ou avant setRemoteDescription -> queue
+            console.log('📦 ICE mis en file (en attente)');
+            pendingCandidatesQueue.current.push(payload);
           }
           break;
 
         case 'call-rejected':
-          console.log('📞 Appel rejeté par distant');
+          console.log('📞 Appel rejeté par', sender_id);
+          toast.info('Appel rejeté');
           cleanupLocalResources();
           break;
 
         case 'call-ended':
-          console.log('📞 Appel terminé par distant');
+          console.log('📞 Appel terminé par', sender_id);
           cleanupLocalResources();
           break;
 
         case 'error':
-          // Gérer les erreurs du backend (utilisateur non connecté, etc.)
-          const errorData = message as any;
-          const errorMessage = errorData.message || 'Erreur de signaling';
-          const errorTargetId = errorData.target_id || 'inconnu';
-          
-          console.error(`📥 Signal error from ${errorData.sender_id || 'server'}: ${errorMessage}`);
-          console.error(`Error details:`, {
-            target: errorTargetId,
-            code: errorData.code,
-            available: errorData.available_users
-          });
-          
-          // Si on est en train d'appeler et que l'erreur concerne notre target, annuler l'appel
-          if (isCallerRef.current && currentCallRef.current.targetId === errorTargetId) {
-            console.error('❌ Call failed due to signaling error');
-            
-            // Notifier l'utilisateur
-            toast.error(`Call failed: ${errorMessage}`);
-            
-            // Fermer la connexion WebRTC si elle existe
-            if (peerConnectionRef.current) {
-              peerConnectionRef.current.close();
-              peerConnectionRef.current = null;
-            }
-            
-            setCallState('failed');
+          console.error('📥 Erreur signaling:', message);
+          if (isCallerRef.current) {
+            toast.error(message.message || 'Erreur de connexion');
             cleanupLocalResources();
           }
           break;
@@ -628,17 +443,23 @@ export const useWebRTC = (
     };
 
     signaling.onMessage(handleSignalMessage);
-  }, [signaling, callState, initializeLocalStream, createPeerConnection, processPendingCandidates, cleanupLocalResources, handleCallError]);
+  }, [signaling, callState, cleanupLocalResources, processPendingCandidates, handleCallError]);
 
-  // Appeler un utilisateur
+  /**
+   * Appeler un utilisateur (CALLER)
+   */
   const callUser = useCallback(async (targetId: string, type: CallType = 'video') => {
-    if (callState !== 'idle' || !currentUserId || !signaling) {
-      console.log('⚠️ Impossible d\'appeler');
+    if (!currentUserId || !signaling) {
+      console.log('⚠️ Impossible d\'appeler: pas connecté');
       return;
     }
 
     try {
-      console.log('📞 Appel vers', targetId, '- type:', type);
+      // Reset propre
+      cleanupLocalResources();
+      
+      console.log('📞 Démarrage appel vers', targetId, '- type:', type);
+      
       setCallState('calling');
       setCallType(type);
       callTypeRef.current = type;
@@ -646,186 +467,184 @@ export const useWebRTC = (
       isCallerRef.current = true;
       currentCallRef.current = { targetId, callerId: currentUserId };
 
+      // 1. Initialiser le média
       const mediaOk = await initializeLocalStream(type);
-      if (!mediaOk || !localStreamRef.current) {
-        console.error('❌ Impossible de démarrer l\'appel sans micro/caméra');
-        cleanupLocalResources();
-        return;
+      if (!mediaOk) {
+        throw new Error('Impossible d\'accéder au micro/caméra');
       }
 
+      // 2. Créer la PeerConnection
       const pc = createPeerConnection(targetId);
       peerConnectionRef.current = pc;
       isRemoteDescriptionSet.current = false;
       pendingCandidatesQueue.current = [];
 
+      // 3. Ajouter les tracks
       if (localStreamRef.current) {
         localStreamRef.current.getTracks().forEach(track => {
+          console.log(`📤 CALLER: Ajout track ${track.kind}`);
           pc.addTrack(track, localStreamRef.current!);
         });
       }
 
-      // CRÉATION DE L'OFFRE avec validation
-      console.log('🎯 Création offer avec contraintes...');
-      
-      const offerOptions: RTCOfferOptions = {
+      // 4. Créer et envoyer l'offre
+      const offer = await pc.createOffer({
         offerToReceiveAudio: true,
-        offerToReceiveVideo: true,
-        iceRestart: false
-      };
-      
-      const offer = await pc.createOffer(offerOptions);
-      
-      // LOG détaillé
-      console.log('📤 Offer générée:', {
-        type: offer.type,
-        sdpLength: offer.sdp?.length || 0,
-        sdpPreview: offer.sdp?.substring(0, 100) + '...'
+        offerToReceiveVideo: type === 'video'
       });
       
-      // VALIDATION et CORRECTION du type (cast en any pour éviter erreur TS)
-      if (!offer.type || (offer.type as any) === 'null' || offer.type === null) {
-        console.warn('⚠️ Offer sans type valide, correction...');
+      if (!offer.type) {
         (offer as any).type = 'offer';
       }
       
-      // S'assurer que le SDP n'est pas vide
-      if (!offer.sdp || offer.sdp.length < 10) {
-        console.error('❌ SDP trop court ou vide');
-        throw new Error('SDP invalide: trop court ou vide');
-      }
-      
       await pc.setLocalDescription(offer);
+
+      console.log('📤 Envoi offer:', { type: offer.type, sdpLength: offer.sdp?.length });
       
-      // PRÉPARATION pour envoi - inclure le callType pour que le destinataire sache le type d'appel
-      const offerToSend = {
+      signaling.sendSignal(targetId, 'offer', {
         type: offer.type,
         sdp: offer.sdp,
-        callType: type  // 'audio' ou 'video' - important pour le destinataire
-      };
-      
-      // DEBUG DÉTAILLÉ avant envoi
-      console.log(`📡 [SEND_SIGNAL_DEBUG] Envoi offer:`, {
-        type: 'offer',
-        targetId: targetId,
-        dataKeys: Object.keys(offerToSend),
-        sdpPresent: !!offerToSend.sdp,
-        sdpType: offerToSend.type,
-        sdpTypeValid: offerToSend.type === 'offer' || offerToSend.type === 'answer',
-        sdpLength: offerToSend.sdp?.length || 0,
-        sdpPreview: offerToSend.sdp?.substring(0, 100) + '...'
+        callType: type
       });
-      
-      // STRINGIFY pour voir exactement ce qui est envoyé
-      const payloadToSend = {
-        type: 'offer',
-        target_id: targetId,
-        payload: offerToSend
-      };
-      
-      console.log('📦 Payload envoyé (stringifié):', JSON.stringify(payloadToSend, null, 2));
-      
-      // Vérifier que signaling est disponible
-      if (!signaling) {
-        console.error('❌ Signaling non disponible pour envoyer offer');
-        throw new Error('Signaling not available');
-      }
-      
-      signaling.sendSignal(targetId, 'offer', offerToSend);
-      console.log('✅ Offre envoyée avec succès');
+
+      console.log('✅ Offre envoyée');
 
     } catch (error) {
       const err = error instanceof Error ? error : new Error(String(error));
-      handleCallError(err, 'call initiation');
+      handleCallError(err, 'callUser');
       cleanupLocalResources();
     }
-  }, [callState, currentUserId, signaling, initializeLocalStream, createPeerConnection, cleanupLocalResources]);
+  }, [currentUserId, signaling, initializeLocalStream, createPeerConnection, cleanupLocalResources, handleCallError]);
 
-  // Accepter un appel
+  /**
+   * Accepter un appel (CALLEE) - FIX ONE-WAY AUDIO
+   * L'ordre est CRITIQUE: Média -> PC -> Tracks -> setRemote -> createAnswer
+   */
   const acceptCall = useCallback(async () => {
-    if (callState !== 'ringing' || !peerConnectionRef.current || !currentCallRef.current.callerId) {
-      console.log('⚠️ Aucun appel à accepter');
+    if (!currentCallRef.current.callerId || !pendingOfferRef.current) {
+      console.error('❌ acceptCall: offre ou caller manquant');
       return;
     }
 
+    const callerId = currentCallRef.current.callerId;
+    const storedOffer = pendingOfferRef.current;
+
     try {
-      console.log('✅ Acceptation appel');
-      const pc = peerConnectionRef.current;
+      console.log('✅ Acceptation appel de', callerId);
+
+      // 1. D'ABORD: Initialiser le média (action utilisateur requise)
+      const mediaOk = await initializeLocalStream(callTypeRef.current);
+      if (!mediaOk) {
+        throw new Error('Impossible d\'accéder au micro/caméra');
+      }
+
+      // 2. ENSUITE: Créer la PeerConnection
+      const pc = createPeerConnection(callerId);
+      peerConnectionRef.current = pc;
+
+      // 3. AJOUTER LES TRACKS AVANT createAnswer (CRITIQUE!)
+      if (localStreamRef.current) {
+        const tracks = localStreamRef.current.getTracks();
+        console.log(`📤 CALLEE: Ajout de ${tracks.length} tracks locaux AVANT answer`);
+        tracks.forEach(track => {
+          console.log(`📤 Ajout track: ${track.kind}, enabled=${track.enabled}`);
+          pc.addTrack(track, localStreamRef.current!);
+        });
+      } else {
+        console.error('❌ CALLEE: PAS DE STREAM LOCAL!');
+        throw new Error('Stream local non disponible');
+      }
+
+      // 4. Définir l'offre distante
+      await pc.setRemoteDescription(new RTCSessionDescription(storedOffer));
+      isRemoteDescriptionSet.current = true;
+      console.log('✅ Remote description set');
+
+      // 5. Traiter les candidats ICE en attente
+      await processPendingCandidates();
+
+      // 6. CRÉER LA RÉPONSE (maintenant les tracks sont dedans!)
       const answer = await pc.createAnswer();
       
-      // VALIDATION et CORRECTION du type answer (cast en any pour éviter erreur TS)
-      if (!answer.type || (answer.type as any) === 'null' || answer.type === null) {
-        console.warn('⚠️ Answer sans type valide, correction...');
+      if (!answer.type) {
         (answer as any).type = 'answer';
       }
       
       await pc.setLocalDescription(answer);
 
-      // DEBUG DÉTAILLÉ avant envoi de l'answer
-      const answerToSend: RTCSessionDescriptionInit = {
-        type: answer.type,
-        sdp: answer.sdp
-      };
-      
-      console.log(`📡 [SEND_SIGNAL_DEBUG] Envoi answer:`, {
-        type: 'answer',
-        targetId: currentCallRef.current.callerId,
-        dataKeys: Object.keys(answerToSend),
-        sdpPresent: !!answerToSend.sdp,
-        sdpType: answerToSend.type,
-        sdpTypeValid: answerToSend.type === 'offer' || answerToSend.type === 'answer',
-        sdpLength: answerToSend.sdp?.length || 0,
-        sdpPreview: answerToSend.sdp?.substring(0, 100) + '...'
-      });
-      
-      // STRINGIFY pour voir exactement ce qui est envoyé
-      const answerPayloadToSend = {
-        type: 'answer',
-        target_id: currentCallRef.current.callerId,
-        payload: answerToSend
-      };
-      
-      console.log('📦 Answer payload envoyé (stringifié):', JSON.stringify(answerPayloadToSend, null, 2));
-      
-      // Vérifier que signaling est disponible
-      if (!signaling) {
-        console.error('❌ Signaling non disponible pour envoyer answer');
-        throw new Error('Signaling not available');
+      // 7. Vérifier les transceivers (debug)
+      const transceivers = pc.getTransceivers();
+      console.log('📡 CALLEE Transceivers après answer:', transceivers.map(t => ({
+        mid: t.mid,
+        direction: t.direction,
+        currentDirection: t.currentDirection,
+        senderTrack: t.sender?.track?.kind || 'none',
+        senderEnabled: t.sender?.track?.enabled,
+        receiverTrack: t.receiver?.track?.kind || 'none'
+      })));
+
+      // Vérification critique
+      const hasAudioSender = transceivers.some(t => 
+        t.sender?.track?.kind === 'audio' && t.sender.track.enabled
+      );
+      if (!hasAudioSender) {
+        console.error('❌ CRITICAL: Pas de sender audio dans l\'answer!');
+      } else {
+        console.log('✅ Sender audio présent dans l\'answer');
       }
 
-      signaling.sendSignal(currentCallRef.current.callerId, 'answer', answerToSend);
+      // 8. Envoyer la réponse
+      console.log('📤 Envoi answer:', { type: answer.type, sdpLength: answer.sdp?.length });
+      
+      signaling.sendSignal(callerId, 'answer', {
+        type: answer.type,
+        sdp: answer.sdp
+      });
+
       setCallState('connected');
-      console.log('✅ Answer envoyée avec succès');
+      pendingOfferRef.current = null;
+      
+      console.log('✅ Answer envoyée - Appel connecté (callee)');
+
     } catch (error) {
       const err = error instanceof Error ? error : new Error(String(error));
-      handleCallError(err, 'call acceptance');
+      handleCallError(err, 'acceptCall');
+      
+      // Notifier le caller de l'échec
+      if (signaling && callerId) {
+        signaling.sendSignal(callerId, 'call-ended');
+      }
       cleanupLocalResources();
     }
-  }, [callState, signaling, cleanupLocalResources]);
+  }, [initializeLocalStream, createPeerConnection, processPendingCandidates, signaling, cleanupLocalResources, handleCallError]);
 
-  // Rejeter un appel
+  /**
+   * Rejeter un appel
+   */
   const rejectCall = useCallback(() => {
-    if (callState === 'ringing' && currentCallRef.current.callerId && signaling) {
+    if (currentCallRef.current.callerId && signaling) {
       signaling.sendSignal(currentCallRef.current.callerId, 'call-rejected');
     }
     cleanupLocalResources();
-  }, [callState, signaling, cleanupLocalResources]);
+  }, [signaling, cleanupLocalResources]);
 
-  // Cleanup au démontage - UNIQUEMENT cleanupLocalResources (pas d'envoi de signal)
+  /**
+   * Cleanup au démontage
+   */
   useEffect(() => {
     return () => {
       console.log('🧹 useWebRTC unmount cleanup');
-      // Cleanup DIRECT sans envoyer de signal
       if (disconnectTimeoutRef.current) {
         clearTimeout(disconnectTimeoutRef.current);
-        disconnectTimeoutRef.current = null;
+      }
+      if (pendingOfferTimeoutRef.current) {
+        clearTimeout(pendingOfferTimeoutRef.current);
       }
       if (peerConnectionRef.current) {
         peerConnectionRef.current.close();
-        peerConnectionRef.current = null;
       }
       if (localStreamRef.current) {
         localStreamRef.current.getTracks().forEach(track => track.stop());
-        localStreamRef.current = null;
       }
     };
   }, []);

@@ -108,14 +108,21 @@ export function CallInterface({
         audioEl.volume = 1.0; // Volume max
         audioEl.muted = false; // S'assurer que l'élément n'est pas muté
         
-        // Log les tracks audio
+        // Log les tracks audio avec TOUS les détails
         const audioTracks = remoteStream.getAudioTracks();
-        console.log('[CallInterface] 🔊 Audio tracks:', audioTracks.map(t => ({
+        console.log('[CallInterface] 🔊 Audio tracks DÉTAIL:', audioTracks.map(t => ({
           id: t.id,
           enabled: t.enabled,
           muted: t.muted,
-          readyState: t.readyState
+          readyState: t.readyState,
+          label: t.label,
+          kind: t.kind
         })));
+        
+        // Log si le track est muted (problème courant)
+        if (audioTracks.length > 0 && audioTracks[0].muted) {
+          console.warn('[CallInterface] ⚠️ TRACK AUDIO DISTANT MUTÉ! Attente unmute...');
+        }
         
         // Écouter quand le track devient unmuted
         audioTracks.forEach(track => {

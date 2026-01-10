@@ -1,10 +1,11 @@
 # ═══════════════════════════════════════════════════════════════════════════════
-# SAÉ 3.02 - Dépendances Python du Serveur
+# Cyber-Connect - Dépendances Python (Hugging Face Spaces Compatible)
 # ═══════════════════════════════════════════════════════════════════════════════
 
-# Framework Web (TCP/HTTP)
+# Framework Web
 fastapi==0.109.0
 uvicorn[standard]==0.27.0
+python-multipart==0.0.6
 
 # Client Supabase
 supabase==2.3.0
@@ -17,6 +18,13 @@ python-dotenv==1.0.0
 
 # Validation des données
 pydantic==2.5.3
+pydantic-settings==2.1.0
 
-# HTTP Client (pour Supabase)
-httpx==0.26.0
+# HTTP Client (compatible supabase 2.3.0)
+httpx>=0.24.0,<0.25.0
+
+# Traduction
+deep-translator==1.11.4
+
+# WebSockets
+websockets==12.0
