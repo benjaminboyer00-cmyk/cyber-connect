@@ -33,10 +33,23 @@ from deep_translator import GoogleTranslator
 
 class Config:
     """Configuration de production - Optimisé Hugging Face Spaces"""
-    # Variables d'environnement compatibles Spaces
-    SUPABASE_URL = os.getenv("SUPABASE_URL") or os.environ.get("SUPABASE_URL", "").strip()
-    SUPABASE_KEY = os.getenv("SUPABASE_ANON_KEY") or os.getenv("SUPABASE_SERVICE_ROLE_KEY") or os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "").strip()
-    ENCRYPTION_KEY = os.getenv("ENCRYPTION_KEY") or os.environ.get("ENCRYPTION_KEY", "").strip()
+    # Variables d'environnement compatibles Spaces - plusieurs fallbacks
+    SUPABASE_URL = (
+        os.getenv("SUPABASE_URL") or 
+        os.environ.get("SUPABASE_URL", "")
+    ).strip()
+    
+    SUPABASE_KEY = (
+        os.getenv("SUPABASE_SERVICE_ROLE_KEY") or  # Priorité au service role
+        os.getenv("SUPABASE_ANON_KEY") or
+        os.getenv("SUPABASE_KEY") or  # Fallback générique
+        os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
+    ).strip()
+    
+    ENCRYPTION_KEY = (
+        os.getenv("ENCRYPTION_KEY") or 
+        os.environ.get("ENCRYPTION_KEY", "")
+    ).strip()
     
     # Port spécifique à Hugging Face
     PORT = int(os.getenv("PORT", 7860))
@@ -1104,7 +1117,13 @@ async def health_check():
         "version": "4.0.2",
         "db": "connected" if db.connected else "disconnected",
         "encryption": "ready" if encryption.initialized else "not_ready",
-        "timestamp": generate_timestamp()
+        "timestamp": generate_timestamp(),
+        "env_check": {
+            "supabase_url_set": bool(Config.SUPABASE_URL),
+            "supabase_key_set": bool(Config.SUPABASE_KEY),
+            "encryption_key_set": bool(Config.ENCRYPTION_KEY),
+            "supabase_url_prefix": Config.SUPABASE_URL[:30] + "..." if Config.SUPABASE_URL else "NOT SET"
+        }
     }
 
 # ============================================================================
