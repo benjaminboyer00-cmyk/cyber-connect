@@ -559,33 +559,38 @@ export const useWebRTC = (
         throw new Error('Impossible d\'accéder au micro/caméra');
       }
 
-      // 2. ENSUITE: Créer la PeerConnection
+      // 2. Créer la PeerConnection
       const pc = createPeerConnection(callerId);
       peerConnectionRef.current = pc;
 
-      // 3. AJOUTER LES TRACKS AVANT createAnswer (CRITIQUE!)
+      // 3. DÉFINIR L'OFFRE DISTANTE D'ABORD (crée les transceivers!)
+      await pc.setRemoteDescription(new RTCSessionDescription(storedOffer));
+      isRemoteDescriptionSet.current = true;
+      console.log('✅ Remote description set');
+
+      // 4. MAINTENANT récupérer les transceivers créés par l'offre et y attacher nos tracks
       if (localStreamRef.current) {
         const tracks = localStreamRef.current.getTracks();
-        console.log(`📤 CALLEE: Ajout de ${tracks.length} tracks locaux AVANT answer`);
-        
-        // Récupérer les transceivers existants de l'offre
         const transceivers = pc.getTransceivers();
-        console.log('📡 Transceivers de l\'offre:', transceivers.length);
+        console.log(`📤 CALLEE: Ajout de ${tracks.length} tracks, ${transceivers.length} transceivers`);
         
         tracks.forEach(track => {
           console.log(`📤 Ajout track: ${track.kind}, enabled=${track.enabled}`);
           
-          // Trouver le transceiver correspondant et y attacher notre track
+          // Trouver le transceiver correspondant (créé par l'offre) et y attacher notre track
           const transceiver = transceivers.find(t => 
-            t.receiver.track?.kind === track.kind && !t.sender.track
+            t.receiver.track?.kind === track.kind && 
+            (!t.sender.track || t.sender.track.id !== track.id)
           );
           
           if (transceiver) {
             transceiver.sender.replaceTrack(track);
-            transceiver.direction = 'sendrecv';
-            console.log(`✅ Track ${track.kind} attaché au transceiver existant`);
+            if (transceiver.direction === 'recvonly') {
+              transceiver.direction = 'sendrecv';
+            }
+            console.log(`✅ Track ${track.kind} attaché au transceiver (dir: ${transceiver.direction})`);
           } else {
-            // Sinon, ajouter normalement
+            // Créer un nouveau transceiver si nécessaire
             pc.addTrack(track, localStreamRef.current!);
             console.log(`✅ Track ${track.kind} ajouté via addTrack`);
           }
@@ -595,15 +600,10 @@ export const useWebRTC = (
         throw new Error('Stream local non disponible');
       }
 
-      // 4. Définir l'offre distante
-      await pc.setRemoteDescription(new RTCSessionDescription(storedOffer));
-      isRemoteDescriptionSet.current = true;
-      console.log('✅ Remote description set');
-
       // 5. Traiter les candidats ICE en attente
       await processPendingCandidates();
 
-      // 6. CRÉER LA RÉPONSE (maintenant les tracks sont dedans!)
+      // 6. CRÉER LA RÉPONSE
       const answer = await pc.createAnswer();
       
       if (!answer.type) {
