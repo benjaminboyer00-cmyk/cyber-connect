@@ -1217,32 +1217,58 @@ async def get_discord_messages(channel_id: str, since: Optional[str] = None):
 
 @app.get("/api/webrtc-config")
 async def get_webrtc_config():
-    """Retourne la configuration ICE pour WebRTC avec serveurs TURN"""
+    """Retourne la configuration ICE pour WebRTC avec serveurs TURN Twilio"""
     
-    # Récupérer les variables d'environnement (définies sur HF Spaces)
-    turn_user = os.getenv("TURN_USERNAME", "openrelayproject")
-    turn_pass = os.getenv("TURN_CREDENTIAL", "openrelayproject")
-    turn_url_tcp = os.getenv("TURN_URL", "turn:openrelay.metered.ca:443?transport=tcp")
-    # Générer une version UDP si possible
-    turn_url_udp = turn_url_tcp.replace("?transport=tcp", "") if "twilio" in turn_url_tcp else "turn:openrelay.metered.ca:80"
-
-    Logger.info(f"📡 Envoi config WebRTC: TURN User={turn_user}")
-
+    # Credentials Twilio API Key (depuis variables d'environnement)
+    twilio_account_sid = os.getenv("TWILIO_ACCOUNT_SID", "")
+    twilio_api_key_sid = os.getenv("TWILIO_API_KEY_SID", "")
+    twilio_api_key_secret = os.getenv("TWILIO_API_KEY_SECRET", "")
+    
+    # Si Twilio est configuré, générer des tokens temporaires
+    if twilio_account_sid and twilio_api_key_sid and twilio_api_key_secret:
+        try:
+            import httpx
+            import base64
+            
+            # Appel API Twilio pour obtenir les tokens TURN
+            auth = base64.b64encode(f"{twilio_api_key_sid}:{twilio_api_key_secret}".encode()).decode()
+            
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    f"https://api.twilio.com/2010-04-01/Accounts/{twilio_account_sid}/Tokens.json",
+                    headers={"Authorization": f"Basic {auth}"},
+                    timeout=10.0
+                )
+                
+                if response.status_code == 201:
+                    data = response.json()
+                    Logger.info(f"✅ Tokens TURN Twilio générés")
+                    return {"iceServers": data.get("ice_servers", [])}
+                else:
+                    Logger.error(f"❌ Erreur Twilio API: {response.status_code}")
+        except Exception as e:
+            Logger.error(f"❌ Erreur génération tokens Twilio: {e}")
+    
+    # Fallback: serveurs publics OpenRelay
+    Logger.info("📡 Utilisation serveurs TURN publics (OpenRelay)")
     return {
         "iceServers": [
-            # STUN Google (toujours utile et gratuit)
             {"urls": "stun:stun.l.google.com:19302"},
             {"urls": "stun:stun1.l.google.com:19302"},
-            # TURN Configuré (Twilio ou OpenRelay selon env vars)
             {
-                "urls": turn_url_tcp,
-                "username": turn_user,
-                "credential": turn_pass
+                "urls": "turn:openrelay.metered.ca:80",
+                "username": "openrelayproject",
+                "credential": "openrelayproject"
             },
             {
-                "urls": turn_url_udp,
-                "username": turn_user,
-                "credential": turn_pass
+                "urls": "turn:openrelay.metered.ca:443",
+                "username": "openrelayproject",
+                "credential": "openrelayproject"
+            },
+            {
+                "urls": "turn:openrelay.metered.ca:443?transport=tcp",
+                "username": "openrelayproject",
+                "credential": "openrelayproject"
             }
         ]
     }
