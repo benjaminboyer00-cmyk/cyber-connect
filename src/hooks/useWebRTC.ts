@@ -547,8 +547,8 @@ export const useWebRTC = (
   }, [currentUserId, signaling, initializeLocalStream, createPeerConnection, cleanupLocalResources, handleCallError]);
 
   /**
-   * Accepter un appel (CALLEE) - FIX ONE-WAY AUDIO
-   * L'ordre est CRITIQUE: Média -> PC -> Tracks -> setRemote -> createAnswer
+   * Accepter un appel (CALLEE) - APPROCHE SIMPLIFIÉE
+   * Pattern: PC -> setRemote -> getTracks -> replaceTrack sur transceivers -> createAnswer
    */
   const acceptCall = useCallback(async () => {
     if (!currentCallRef.current.callerId || !pendingOfferRef.current) {
@@ -562,7 +562,7 @@ export const useWebRTC = (
     try {
       console.log('✅ Acceptation appel de', callerId);
 
-      // 1. D'ABORD: Initialiser le média (action utilisateur requise)
+      // 1. Initialiser le média
       const mediaOk = await initializeLocalStream(callTypeRef.current);
       if (!mediaOk) {
         throw new Error('Impossible d\'accéder au micro/caméra');
@@ -572,64 +572,61 @@ export const useWebRTC = (
       const pc = createPeerConnection(callerId);
       peerConnectionRef.current = pc;
 
-      // 3. AJOUTER LES TRACKS LOCAUX AVANT de définir l'offre distante
-      if (localStreamRef.current) {
-        const tracks = localStreamRef.current.getTracks();
-        console.log(`📤 CALLEE: Ajout de ${tracks.length} tracks locaux AVANT setRemoteDescription`);
-        
-        tracks.forEach(track => {
-          console.log(`📤 Ajout track: ${track.kind}, enabled=${track.enabled}`);
-          pc.addTrack(track, localStreamRef.current!);
-        });
-      } else {
-        console.error('❌ CALLEE: PAS DE STREAM LOCAL!');
-        throw new Error('Stream local non disponible');
-      }
-
-      // 4. DÉFINIR L'OFFRE DISTANTE
+      // 3. DÉFINIR L'OFFRE DISTANTE EN PREMIER (crée les transceivers)
       await pc.setRemoteDescription(new RTCSessionDescription(storedOffer));
       isRemoteDescriptionSet.current = true;
       console.log('✅ Remote description set');
 
+      // 4. Récupérer les transceivers créés par l'offre et y attacher nos tracks
+      const transceivers = pc.getTransceivers();
+      console.log(`📡 CALLEE: ${transceivers.length} transceivers après setRemote`);
+      
+      if (localStreamRef.current) {
+        const localTracks = localStreamRef.current.getTracks();
+        console.log(`📤 CALLEE: ${localTracks.length} tracks locaux à attacher`);
+        
+        for (const track of localTracks) {
+          // Trouver le transceiver correspondant au type de track
+          const transceiver = transceivers.find(t => 
+            t.receiver.track?.kind === track.kind
+          );
+          
+          if (transceiver) {
+            // Remplacer le track du sender par notre track local
+            await transceiver.sender.replaceTrack(track);
+            // Forcer la direction en sendrecv
+            transceiver.direction = 'sendrecv';
+            console.log(`✅ Track ${track.kind} attaché via replaceTrack (dir: sendrecv)`);
+          } else {
+            // Pas de transceiver existant, en créer un nouveau
+            pc.addTrack(track, localStreamRef.current!);
+            console.log(`✅ Track ${track.kind} ajouté via addTrack`);
+          }
+        }
+      } else {
+        throw new Error('Stream local non disponible');
+      }
+
       // 5. Traiter les candidats ICE en attente
       await processPendingCandidates();
 
-      // 6. CRÉER LA RÉPONSE
-      const answer = await pc.createAnswer({
-        offerToReceiveAudio: true,
-        offerToReceiveVideo: callTypeRef.current === 'video'
-      });
-      
-      if (!answer.type) {
-        (answer as any).type = 'answer';
-      }
-      
+      // 6. Créer et envoyer la réponse
+      const answer = await pc.createAnswer();
+      if (!answer.type) (answer as any).type = 'answer';
       await pc.setLocalDescription(answer);
 
-      // 7. Vérifier les transceivers (debug)
-      const transceivers = pc.getTransceivers();
-      console.log('📡 CALLEE Transceivers après answer:', transceivers.map(t => ({
+      // 7. Debug: vérifier l'état final des transceivers
+      const finalTransceivers = pc.getTransceivers();
+      console.log('📡 CALLEE Transceivers FINAL:', finalTransceivers.map(t => ({
         mid: t.mid,
         direction: t.direction,
-        currentDirection: t.currentDirection,
         senderTrack: t.sender?.track?.kind || 'none',
         senderEnabled: t.sender?.track?.enabled,
         receiverTrack: t.receiver?.track?.kind || 'none'
       })));
 
-      // Vérification critique
-      const hasAudioSender = transceivers.some(t => 
-        t.sender?.track?.kind === 'audio' && t.sender.track.enabled
-      );
-      if (!hasAudioSender) {
-        console.error('❌ CRITICAL: Pas de sender audio dans l\'answer!');
-      } else {
-        console.log('✅ Sender audio présent dans l\'answer');
-      }
-
       // 8. Envoyer la réponse
       console.log('📤 Envoi answer:', { type: answer.type, sdpLength: answer.sdp?.length });
-      
       signaling.sendSignal(callerId, 'answer', {
         type: answer.type,
         sdp: answer.sdp
@@ -637,14 +634,11 @@ export const useWebRTC = (
 
       setCallState('connected');
       pendingOfferRef.current = null;
-      
       console.log('✅ Answer envoyée - Appel connecté (callee)');
 
     } catch (error) {
       const err = error instanceof Error ? error : new Error(String(error));
       handleCallError(err, 'acceptCall');
-      
-      // Notifier le caller de l'échec
       if (signaling && callerId) {
         signaling.sendSignal(callerId, 'call-ended');
       }
