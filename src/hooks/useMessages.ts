@@ -395,7 +395,7 @@ export function useMessages(conversationId: string | null, userId: string | unde
   /**
    * Envoi de message via le serveur Python
    */
-  const sendMessage = async (content: string, imageUrl?: string): Promise<{ error: Error | null }> => {
+  const sendMessage = async (content: string, imageUrl?: string, replyToId?: string): Promise<{ error: Error | null }> => {
     if (!conversationId || !userId) {
       return { error: new Error('Invalid state: missing conversationId or userId') };
     }
@@ -412,6 +412,10 @@ export function useMessages(conversationId: string | null, userId: string | unde
       
       if (imageUrl) {
         payload.image_url = imageUrl;
+      }
+      
+      if (replyToId) {
+        payload.reply_to_id = replyToId;
       }
       
       const response = await fetch(getEndpointUrl('SEND_MESSAGE'), {

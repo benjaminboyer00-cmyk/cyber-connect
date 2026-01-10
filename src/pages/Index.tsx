@@ -159,8 +159,8 @@ export default function Index() {
     }
   };
 
-  const handleSendMessage = async (content: string, imageUrl?: string) => {
-    const { error } = await sendMessage(content, imageUrl);
+  const handleSendMessage = async (content: string, imageUrl?: string, replyToId?: string) => {
+    const { error } = await sendMessage(content, imageUrl, replyToId);
     if (error) {
       toast.error("Erreur lors de l'envoi du message");
     }
