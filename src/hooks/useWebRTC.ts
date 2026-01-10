@@ -502,18 +502,18 @@ export const useWebRTC = (
       isRemoteDescriptionSet.current = false;
       pendingCandidatesQueue.current = [];
 
-      // 3. Ajouter les transceivers bidirectionnels AVANT addTrack
-      // Ceci garantit que l'offre demande de recevoir audio/video
-      pc.addTransceiver('audio', { direction: 'sendrecv' });
-      if (type === 'video') {
-        pc.addTransceiver('video', { direction: 'sendrecv' });
-      }
-
-      // 4. Ajouter les tracks locaux
+      // 3. Ajouter les tracks locaux (crée automatiquement les transceivers)
       if (localStreamRef.current) {
         localStreamRef.current.getTracks().forEach(track => {
           console.log(`📤 CALLER: Ajout track ${track.kind}`);
           pc.addTrack(track, localStreamRef.current!);
+        });
+        
+        // Forcer les transceivers en sendrecv
+        pc.getTransceivers().forEach(t => {
+          if (t.direction === 'sendonly') {
+            t.direction = 'sendrecv';
+          }
         });
       }
 
