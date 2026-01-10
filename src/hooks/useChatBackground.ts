@@ -45,6 +45,40 @@ export function useChatBackground(conversationId: string | null, userId: string 
 
     // Puis essayer de charger depuis Supabase (metadata de conversation)
     loadBackgroundFromDB(conversationId);
+
+    // Écouter les changements en temps réel
+    const channel = supabase
+      .channel(`conv-bg-${conversationId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'conversations',
+          filter: `id=eq.${conversationId}`
+        },
+        (payload) => {
+          console.log('📸 Fond de conversation mis à jour:', payload);
+          const newMetadata = (payload.new as any)?.metadata;
+          if (newMetadata?.background_url) {
+            setBackground(newMetadata.background_url);
+            saveLocalBackground(conversationId, {
+              conversationId,
+              backgroundUrl: newMetadata.background_url,
+              setBy: newMetadata.background_set_by || '',
+              updatedAt: newMetadata.background_updated_at || new Date().toISOString()
+            });
+          } else if (newMetadata && !newMetadata.background_url) {
+            // Fond supprimé
+            setBackground(null);
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, [conversationId]);
 
   const loadBackgroundFromDB = async (convId: string) => {
