@@ -1147,6 +1147,15 @@ async def get_profile_extra(user_id: str):
     """Récupérer les infos profil supplémentaires"""
     return {"profile": user_profiles_extra.get(user_id, {})}
 
+@app.post("/api/profiles-extra-batch")
+async def get_profiles_extra_batch(user_ids: list[str]):
+    """Récupérer les infos profil de plusieurs utilisateurs"""
+    result = {}
+    for uid in user_ids:
+        if uid in user_profiles_extra:
+            result[uid] = user_profiles_extra[uid]
+    return {"profiles": result}
+
 # ============================================================================
 # CHAT BACKGROUNDS - Synchronisation entre utilisateurs
 # ============================================================================

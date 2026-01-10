@@ -7,10 +7,11 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
+import { API_BASE_URL } from '@/config/api';
 import type { Tables } from '@/integrations/supabase/types';
 
 type Friend = Tables<'friends'>;
-type Profile = Tables<'profiles'>;
+type Profile = Tables<'profiles'> & { display_name?: string | null; bio?: string | null };
 
 export interface FriendWithProfile extends Friend {
   profile: Profile | null;
@@ -58,11 +59,32 @@ export function useFriends(userId: string | undefined) {
 
       const profileMap = new Map(profiles?.map(p => [p.id, p]));
 
+      // Charger les infos supplémentaires (display_name, bio) depuis le backend
+      let extraProfiles: Record<string, { display_name?: string; bio?: string }> = {};
+      try {
+        const res = await fetch(`${API_BASE_URL}/api/profiles-extra-batch`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(Array.from(userIds))
+        });
+        const data = await res.json();
+        extraProfiles = data.profiles || {};
+      } catch {
+        // Ignorer l'erreur
+      }
+
       const friendsWithProfiles: FriendWithProfile[] = (friendsData || []).map(f => {
         const otherUserId = f.user_id === userId ? f.friend_id : f.user_id;
+        const baseProfile = otherUserId ? profileMap.get(otherUserId) || null : null;
+        const extra = otherUserId ? extraProfiles[otherUserId] : null;
+        
         return {
           ...f,
-          profile: otherUserId ? profileMap.get(otherUserId) || null : null
+          profile: baseProfile ? {
+            ...baseProfile,
+            display_name: extra?.display_name || null,
+            bio: extra?.bio || null
+          } : null
         };
       });
 
