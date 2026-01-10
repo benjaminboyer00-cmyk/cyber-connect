@@ -214,21 +214,22 @@ export const useWebRTC = (
         // STUN Google (gratuit, très stable)
         { urls: 'stun:stun.l.google.com:19302' },
         { urls: 'stun:stun1.l.google.com:19302' },
-        // TURN Metered.ca (credentials de l'utilisateur)
+        { urls: 'stun:stun2.l.google.com:19302' },
+        // TURN OpenRelay (gratuit, public)
         {
-          urls: 'turn:standard.relay.metered.ca:80',
-          username: '2ce8447dffad525621446d76',
-          credential: 'vQ4YEJGIKoc9MmTx'
+          urls: 'turn:openrelay.metered.ca:80',
+          username: 'openrelayproject',
+          credential: 'openrelayproject'
         },
         {
-          urls: 'turn:standard.relay.metered.ca:443',
-          username: '2ce8447dffad525621446d76',
-          credential: 'vQ4YEJGIKoc9MmTx'
+          urls: 'turn:openrelay.metered.ca:443',
+          username: 'openrelayproject',
+          credential: 'openrelayproject'
         },
         {
-          urls: 'turns:standard.relay.metered.ca:443?transport=tcp',
-          username: '2ce8447dffad525621446d76',
-          credential: 'vQ4YEJGIKoc9MmTx'
+          urls: 'turn:openrelay.metered.ca:443?transport=tcp',
+          username: 'openrelayproject',
+          credential: 'openrelayproject'
         }
       ],
       iceCandidatePoolSize: 2,
