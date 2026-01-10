@@ -1219,58 +1219,32 @@ async def get_discord_messages(channel_id: str, since: Optional[str] = None):
 async def get_webrtc_config():
     """Retourne la configuration ICE pour WebRTC avec serveurs TURN"""
     
-    # Credentials depuis variables d'environnement (ou valeurs par défaut publiques)
-    TURN_USERNAME = os.getenv("TURN_USERNAME", "openrelayproject")
-    TURN_CREDENTIAL = os.getenv("TURN_CREDENTIAL", "openrelayproject")
-    
-    ice_configs = {
-        "default": {
-            "iceServers": [
-                # STUN Google (gratuit, stable)
-                {"urls": "stun:stun.l.google.com:19302"},
-                {"urls": "stun:stun1.l.google.com:19302"},
-                {"urls": "stun:stun2.l.google.com:19302"},
-                # TURN OpenRelay (public, gratuit)
-                {
-                    "urls": "turn:openrelay.metered.ca:80",
-                    "username": "openrelayproject",
-                    "credential": "openrelayproject"
-                },
-                {
-                    "urls": "turn:openrelay.metered.ca:443",
-                    "username": "openrelayproject",
-                    "credential": "openrelayproject"
-                },
-                {
-                    "urls": "turn:openrelay.metered.ca:443?transport=tcp",
-                    "username": "openrelayproject",
-                    "credential": "openrelayproject"
-                }
-            ],
-            "iceCandidatePoolSize": 2
-        },
-        "custom": {
-            "iceServers": [
-                {"urls": "stun:stun.l.google.com:19302"},
-                {"urls": "stun:stun1.l.google.com:19302"},
-                {
-                    "urls": os.getenv("TURN_URL", "turn:openrelay.metered.ca:443"),
-                    "username": TURN_USERNAME,
-                    "credential": TURN_CREDENTIAL
-                }
-            ],
-            "iceCandidatePoolSize": 2
-        }
-    }
-    
+    # Récupérer les variables d'environnement (définies sur HF Spaces)
+    turn_user = os.getenv("TURN_USERNAME", "openrelayproject")
+    turn_pass = os.getenv("TURN_CREDENTIAL", "openrelayproject")
+    turn_url_tcp = os.getenv("TURN_URL", "turn:openrelay.metered.ca:443?transport=tcp")
+    # Générer une version UDP si possible
+    turn_url_udp = turn_url_tcp.replace("?transport=tcp", "") if "twilio" in turn_url_tcp else "turn:openrelay.metered.ca:80"
+
+    Logger.info(f"📡 Envoi config WebRTC: TURN User={turn_user}")
+
     return {
-        "configs": ice_configs,
-        "recommended": "default",
-        "debug": {
-            "timestamp": generate_timestamp(),
-            "space_host": Config.SPACE_HOST,
-            "ws_url": f"wss://{Config.SPACE_HOST}/ws/{{user_id}}"
-        }
+        "iceServers": [
+            # STUN Google (toujours utile et gratuit)
+            {"urls": "stun:stun.l.google.com:19302"},
+            {"urls": "stun:stun1.l.google.com:19302"},
+            # TURN Configuré (Twilio ou OpenRelay selon env vars)
+            {
+                "urls": turn_url_tcp,
+                "username": turn_user,
+                "credential": turn_pass
+            },
+            {
+                "urls": turn_url_udp,
+                "username": turn_user,
+                "credential": turn_pass
+            }
+        ]
     }
 
 @app.post("/api/webrtc-diagnostic")

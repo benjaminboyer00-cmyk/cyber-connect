@@ -11,6 +11,7 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { toast } from 'sonner';
+import { API_BASE_URL } from '@/config/api';
 
 export type CallState = 'idle' | 'calling' | 'ringing' | 'connected' | 'failed';
 export type CallType = 'audio' | 'video';
@@ -38,9 +39,15 @@ export const useWebRTC = (
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
   const [isCaller, setIsCaller] = useState(false);
   
+  // Config ICE dynamique (chargée depuis le backend)
+  const [iceServers, setIceServers] = useState<RTCIceServer[]>([
+    { urls: 'stun:stun.l.google.com:19302' } // Fallback minimal
+  ]);
+  
   // Refs pour éviter les race conditions
   const callTypeRef = useRef<CallType>('video');
   const isCallerRef = useRef<boolean>(false);
+  const iceServersRef = useRef<RTCIceServer[]>(iceServers);
   
   const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
@@ -60,6 +67,30 @@ export const useWebRTC = (
 
   // Timeout pour ICE failed
   const disconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Charger la config ICE depuis le backend au montage
+  useEffect(() => {
+    const fetchIceConfig = async () => {
+      try {
+        console.log('🔄 Récupération config TURN...');
+        const res = await fetch(`${API_BASE_URL}/api/webrtc-config`);
+        const data = await res.json();
+        if (data.iceServers) {
+          setIceServers(data.iceServers);
+          iceServersRef.current = data.iceServers;
+          console.log('✅ Config TURN chargée:', data.iceServers.length, 'serveurs');
+        }
+      } catch (e) {
+        console.error('❌ Erreur config TURN, usage fallback:', e);
+      }
+    };
+    fetchIceConfig();
+  }, []);
+
+  // Sync ref avec state
+  useEffect(() => {
+    iceServersRef.current = iceServers;
+  }, [iceServers]);
 
   /**
    * Gestionnaire d'erreur centralisé pour WebRTC
@@ -209,33 +240,14 @@ export const useWebRTC = (
   const createPeerConnection = useCallback((targetId: string) => {
     console.log('🔧 Création PeerConnection vers', targetId);
     
-    // Configuration ICE avec serveurs TURN publics (pour traverser NAT/firewalls)
+    // Configuration ICE dynamique (chargée depuis le backend)
     const pc = new RTCPeerConnection({
-      iceServers: [
-        // STUN Google (gratuit, stable)
-        { urls: 'stun:stun.l.google.com:19302' },
-        { urls: 'stun:stun1.l.google.com:19302' },
-        { urls: 'stun:stun2.l.google.com:19302' },
-        // TURN OpenRelay (public, gratuit)
-        {
-          urls: 'turn:openrelay.metered.ca:80',
-          username: 'openrelayproject',
-          credential: 'openrelayproject'
-        },
-        {
-          urls: 'turn:openrelay.metered.ca:443',
-          username: 'openrelayproject',
-          credential: 'openrelayproject'
-        },
-        {
-          urls: 'turn:openrelay.metered.ca:443?transport=tcp',
-          username: 'openrelayproject',
-          credential: 'openrelayproject'
-        }
-      ],
+      iceServers: iceServersRef.current,
       iceCandidatePoolSize: 2,
       iceTransportPolicy: 'all' as RTCIceTransportPolicy
     });
+    
+    console.log('🔧 PeerConnection créée avec', iceServersRef.current.length, 'serveurs ICE');
 
     pc.onicegatheringstatechange = () => {
       console.log('🧊 ICE gathering state:', pc.iceGatheringState);
