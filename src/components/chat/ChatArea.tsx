@@ -96,6 +96,7 @@ export function ChatArea({
   const [bgDialogOpen, setBgDialogOpen] = useState(false);
   const [bgUrl, setBgUrl] = useState('');
   const bgInputRef = useRef<HTMLInputElement>(null);
+  const [profileModalOpen, setProfileModalOpen] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { uploadFileByChunks, uploading, progress, reset: resetUpload } = useChunkUpload();
@@ -258,7 +259,10 @@ export function ChatArea({
               </>
             )}
           </Avatar>
-          <div className="max-w-[200px]">
+          <div 
+            className="max-w-[200px] cursor-pointer hover:opacity-80 transition-opacity"
+            onClick={() => !isGroup && setProfileModalOpen(true)}
+          >
             <p className="font-semibold text-foreground truncate">
               {(contact as any)?.display_name || displayName}
             </p>
