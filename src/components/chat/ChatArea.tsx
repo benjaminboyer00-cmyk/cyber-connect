@@ -47,6 +47,10 @@ interface ChatAreaProps {
   signalingConnected?: boolean;
   onStartCall?: (targetUserId: string, type: 'audio' | 'video') => void;
   onRemoveFriend?: (friendId: string) => void;
+  // Réactions
+  onReaction?: (messageId: string, emoji: string) => void;
+  getReactionCounts?: (messageId: string) => { [emoji: string]: number };
+  hasUserReacted?: (messageId: string, emoji: string) => boolean;
 }
 
 export function ChatArea({ 
@@ -62,6 +66,9 @@ export function ChatArea({
   signalingConnected = false,
   onStartCall,
   onRemoveFriend,
+  onReaction,
+  getReactionCounts,
+  hasUserReacted,
 }: ChatAreaProps) {
   const [message, setMessage] = useState('');
   const [selectedImage, setSelectedImage] = useState<File | null>(null);
@@ -407,6 +414,9 @@ export function ChatArea({
                   currentUserId={currentUserId || ''}
                   formatTime={formatTime}
                   onReply={(m) => setReplyingTo(m)}
+                  onReaction={onReaction}
+                  reactionCounts={getReactionCounts?.(msg.id)}
+                  hasUserReacted={hasUserReacted}
                 />
               );
             })

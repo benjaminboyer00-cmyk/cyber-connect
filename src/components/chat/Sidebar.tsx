@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { LogOut, Search, UserPlus, MessageSquarePlus, Users, Trash2, Shuffle } from 'lucide-react';
+import { LogOut, Search, UserPlus, MessageSquarePlus, Users, Trash2, Shuffle, Bot } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -44,6 +44,7 @@ interface SidebarProps {
   onViewRequests: () => void;
   onCreateGroup: () => void;
   onUpdateAvatar?: (avatarUrl: string) => Promise<void>;
+  onOpenDiscordBots?: () => void;
 }
 
 export function Sidebar({
@@ -58,7 +59,8 @@ export function Sidebar({
   onNewChat,
   onViewRequests,
   onCreateGroup,
-  onUpdateAvatar
+  onUpdateAvatar,
+  onOpenDiscordBots
 }: SidebarProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
@@ -195,6 +197,17 @@ export function Sidebar({
             </Badge>
           )}
         </Button>
+        {onOpenDiscordBots && (
+          <Button 
+            variant="secondary" 
+            size="sm" 
+            className="gap-1 text-xs"
+            onClick={onOpenDiscordBots}
+            title="Bots Discord"
+          >
+            <Bot className="w-4 h-4" />
+          </Button>
+        )}
       </div>
 
       {/* Conversations */}

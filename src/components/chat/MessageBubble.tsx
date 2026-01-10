@@ -63,12 +63,17 @@ interface MessageBubbleProps {
   formatTime: (dateStr: string | null) => string;
   onReply?: (message: MessageWithSender) => void;
   onReaction?: (messageId: string, emoji: string) => void;
+  reactionCounts?: { [emoji: string]: number };
+  hasUserReacted?: (messageId: string, emoji: string) => boolean;
 }
 
-export function MessageBubble({ message, isOwn, currentUserId, formatTime, onReply, onReaction }: MessageBubbleProps) {
+export function MessageBubble({ message, isOwn, currentUserId, formatTime, onReply, onReaction, reactionCounts, hasUserReacted }: MessageBubbleProps) {
   const [translation, setTranslation] = useState<string | null>(null);
   const [isTranslating, setIsTranslating] = useState(false);
   const [showReactions, setShowReactions] = useState(false);
+  
+  // Vérifier s'il y a des réactions
+  const hasReactions = reactionCounts && Object.keys(reactionCounts).length > 0;
 
   const handleTranslate = async () => {
     if (!message.content || isTranslating || translation) return;
@@ -204,6 +209,26 @@ export function MessageBubble({ message, isOwn, currentUserId, formatTime, onRep
             )}
           </div>
         </div>
+        
+        {/* Réactions affichées */}
+        {hasReactions && (
+          <div className={`flex flex-wrap gap-1 mt-1 ${isOwn ? 'justify-end' : 'justify-start'}`}>
+            {Object.entries(reactionCounts!).map(([emoji, count]) => (
+              <button
+                key={emoji}
+                onClick={() => onReaction?.(message.id, emoji)}
+                className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-xs border transition-colors ${
+                  hasUserReacted?.(message.id, emoji)
+                    ? 'bg-primary/20 border-primary text-primary'
+                    : 'bg-muted/50 border-border hover:bg-muted'
+                }`}
+              >
+                <span>{emoji}</span>
+                <span className="text-[10px]">{count}</span>
+              </button>
+            ))}
+          </div>
+        )}
         
         <p className={`text-xs text-muted-foreground mt-1 ${isOwn ? 'text-right' : ''}`}>
           {formatTime(message.created_at)}

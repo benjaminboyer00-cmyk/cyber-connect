@@ -8,6 +8,7 @@ import { useMessages } from '@/hooks/useMessages';
 import { useSignaling } from '@/hooks/useSignaling';
 import { useWebRTC } from '@/hooks/useWebRTC';
 import { useHeartbeat } from '@/hooks/useHeartbeat';
+import { useReactions } from '@/hooks/useReactions';
 import { Sidebar } from '@/components/chat/Sidebar';
 import { ChatArea } from '@/components/chat/ChatArea';
 import { SearchUsersModal } from '@/components/friends/SearchUsersModal';
@@ -16,6 +17,16 @@ import { NewChatModal } from '@/components/friends/NewChatModal';
 import { CreateGroupModal } from '@/components/friends/CreateGroupModal';
 import { IncomingCallModal } from '@/components/chat/IncomingCallModal';
 import { CallInterface } from '@/components/chat/CallInterface';
+import { DiscordBotSettings } from '@/components/settings/DiscordBotSettings';
+import {
+  AlertDialog,
+  AlertDialogContent,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogCancel,
+} from '@/components/ui/alert-dialog';
 import { toast } from 'sonner';
 
 export default function Index() {
@@ -50,6 +61,10 @@ export default function Index() {
   const [requestsModalOpen, setRequestsModalOpen] = useState(false);
   const [newChatModalOpen, setNewChatModalOpen] = useState(false);
   const [createGroupModalOpen, setCreateGroupModalOpen] = useState(false);
+  const [discordBotsModalOpen, setDiscordBotsModalOpen] = useState(false);
+  
+  // Réactions
+  const { addReaction, getReactionCounts, hasUserReacted } = useReactions(user?.id);
 
   const { messages, loading: messagesLoading, sendMessage } = useMessages(selectedConversation, user?.id);
 
@@ -187,6 +202,7 @@ export default function Index() {
         onUpdateAvatar={async (avatarUrl) => {
           await updateProfile({ avatar_url: avatarUrl });
         }}
+        onOpenDiscordBots={() => setDiscordBotsModalOpen(true)}
       />
       
       <ChatArea
@@ -208,6 +224,9 @@ export default function Index() {
             refetchConversations();
           }
         }}
+        onReaction={addReaction}
+        getReactionCounts={getReactionCounts}
+        hasUserReacted={hasUserReacted}
       />
 
       {/* Modal appel entrant */}
@@ -260,6 +279,22 @@ export default function Index() {
         friends={friends}
         onCreateGroup={handleCreateGroup}
       />
+
+      {/* Modal Discord Bots Global */}
+      <AlertDialog open={discordBotsModalOpen} onOpenChange={setDiscordBotsModalOpen}>
+        <AlertDialogContent className="max-w-md">
+          <AlertDialogHeader>
+            <AlertDialogTitle>🤖 Bots Discord</AlertDialogTitle>
+            <AlertDialogDescription>
+              Gérez vos webhooks Discord pour recevoir les messages.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <DiscordBotSettings conversationId="global" />
+          <AlertDialogFooter>
+            <AlertDialogCancel>Fermer</AlertDialogCancel>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
