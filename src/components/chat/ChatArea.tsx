@@ -55,6 +55,10 @@ interface ChatAreaProps {
   isMessagePinned?: (messageId: string) => boolean;
   onPinMessage?: (messageId: string) => void;
   onUnpinMessage?: (messageId: string) => void;
+  // Fond de chat par conversation
+  chatBackground?: string | null;
+  onSetChatBackground?: (url: string) => void;
+  onClearChatBackground?: () => void;
 }
 
 export function ChatArea({ 
@@ -76,6 +80,9 @@ export function ChatArea({
   isMessagePinned,
   onPinMessage,
   onUnpinMessage,
+  chatBackground,
+  onSetChatBackground,
+  onClearChatBackground,
 }: ChatAreaProps) {
   const [message, setMessage] = useState('');
   const [selectedImage, setSelectedImage] = useState<File | null>(null);
@@ -86,6 +93,9 @@ export function ChatArea({
   const [searchQuery, setSearchQuery] = useState('');
   const [replyingTo, setReplyingTo] = useState<MessageWithSender | null>(null);
   const [discordSettingsOpen, setDiscordSettingsOpen] = useState(false);
+  const [bgDialogOpen, setBgDialogOpen] = useState(false);
+  const [bgUrl, setBgUrl] = useState('');
+  const bgInputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { uploadFileByChunks, uploading, progress, reset: resetUpload } = useChunkUpload();
@@ -307,6 +317,13 @@ export function ChatArea({
             <DropdownMenuContent align="end">
               <DropdownMenuItem 
                 className="cursor-pointer"
+                onClick={() => setBgDialogOpen(true)}
+              >
+                <span className="mr-2">🖼️</span>
+                Fond de conversation
+              </DropdownMenuItem>
+              <DropdownMenuItem 
+                className="cursor-pointer"
                 onClick={() => setDiscordSettingsOpen(true)}
               >
                 <span className="mr-2">🤖</span>
@@ -373,6 +390,66 @@ export function ChatArea({
         </AlertDialogContent>
       </AlertDialog>
 
+      {/* Dialog Fond de conversation */}
+      <AlertDialog open={bgDialogOpen} onOpenChange={setBgDialogOpen}>
+        <AlertDialogContent className="max-w-md">
+          <AlertDialogHeader>
+            <AlertDialogTitle>🖼️ Fond de conversation</AlertDialogTitle>
+            <AlertDialogDescription>
+              Changez le fond de cette conversation. L'autre personne verra aussi ce fond.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <label className="text-sm font-medium">URL de l'image</label>
+              <Input
+                placeholder="https://exemple.com/image.jpg"
+                value={bgUrl}
+                onChange={(e) => setBgUrl(e.target.value)}
+                className="bg-background text-foreground"
+              />
+            </div>
+            {chatBackground && (
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Aperçu actuel</label>
+                <div 
+                  className="h-24 rounded-lg bg-cover bg-center border border-border"
+                  style={{ backgroundImage: `url(${chatBackground})` }}
+                />
+              </div>
+            )}
+          </div>
+          <AlertDialogFooter>
+            {chatBackground && (
+              <Button 
+                variant="outline" 
+                onClick={() => {
+                  onClearChatBackground?.();
+                  setBgDialogOpen(false);
+                  toast.success('Fond supprimé');
+                }}
+              >
+                Supprimer
+              </Button>
+            )}
+            <AlertDialogCancel>Annuler</AlertDialogCancel>
+            <Button 
+              onClick={() => {
+                if (bgUrl.trim()) {
+                  onSetChatBackground?.(bgUrl.trim());
+                  setBgUrl('');
+                  setBgDialogOpen(false);
+                  toast.success('Fond appliqué !');
+                }
+              }}
+              disabled={!bgUrl.trim()}
+            >
+              Appliquer
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
       {/* Barre de recherche */}
       {searchOpen && (
         <div className="px-4 py-2 border-b border-border bg-muted/30">
@@ -397,7 +474,10 @@ export function ChatArea({
       )}
 
       {/* Messages */}
-      <ScrollArea className="flex-1 p-6 scrollbar-thin">
+      <ScrollArea 
+        className="flex-1 p-6 scrollbar-thin bg-cover bg-center bg-no-repeat"
+        style={chatBackground ? { backgroundImage: `url(${chatBackground})` } : {}}
+      >
         <div className="space-y-4 max-w-3xl mx-auto">
           {loading ? (
             <div className="text-center py-8">

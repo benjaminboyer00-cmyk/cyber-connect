@@ -11,6 +11,7 @@ import { useHeartbeat } from '@/hooks/useHeartbeat';
 import { useReactions } from '@/hooks/useReactions';
 import { useTheme } from '@/hooks/useTheme';
 import { usePinnedMessages } from '@/hooks/usePinnedMessages';
+import { useChatBackground } from '@/hooks/useChatBackground';
 import { Sidebar } from '@/components/chat/Sidebar';
 import { ChatArea } from '@/components/chat/ChatArea';
 import { SearchUsersModal } from '@/components/friends/SearchUsersModal';
@@ -74,6 +75,9 @@ export default function Index() {
   
   // Messages épinglés
   const { pinMessage, unpinMessage, isMessagePinned } = usePinnedMessages(selectedConversation, user?.id);
+  
+  // Fond de chat par conversation
+  const { background: chatBackground, setConversationBackground, clearBackground } = useChatBackground(selectedConversation, user?.id);
   
   // Thème
   useTheme(); // Initialise le thème au chargement
@@ -244,6 +248,9 @@ export default function Index() {
         isMessagePinned={isMessagePinned}
         onPinMessage={pinMessage}
         onUnpinMessage={unpinMessage}
+        chatBackground={chatBackground}
+        onSetChatBackground={(url) => setConversationBackground(url)}
+        onClearChatBackground={clearBackground}
       />
 
       {/* Modal appel entrant */}
