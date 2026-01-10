@@ -258,8 +258,10 @@ export function ChatArea({
               </>
             )}
           </Avatar>
-          <div>
-            <p className="font-semibold text-foreground">{displayName}</p>
+          <div className="max-w-[200px]">
+            <p className="font-semibold text-foreground truncate">
+              {(contact as any)?.display_name || displayName}
+            </p>
             <div className="flex items-center gap-1">
               {!isGroup && (
                 <span className={`w-2 h-2 rounded-full ${contact?.status === 'online' ? 'bg-green-500' : 'bg-gray-500'}`} />
@@ -268,6 +270,11 @@ export function ChatArea({
                 {displayStatus}
               </span>
             </div>
+            {!isGroup && (contact as any)?.bio && (
+              <p className="text-xs text-muted-foreground truncate mt-0.5 italic">
+                {(contact as any).bio}
+              </p>
+            )}
           </div>
         </div>
         
