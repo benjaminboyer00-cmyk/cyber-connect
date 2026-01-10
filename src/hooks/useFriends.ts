@@ -59,32 +59,14 @@ export function useFriends(userId: string | undefined) {
 
       const profileMap = new Map(profiles?.map(p => [p.id, p]));
 
-      // Charger les infos supplémentaires (display_name, bio) depuis le backend
-      let extraProfiles: Record<string, { display_name?: string; bio?: string }> = {};
-      try {
-        const res = await fetch(`${API_BASE_URL}/api/profiles-extra-batch`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(Array.from(userIds))
-        });
-        const data = await res.json();
-        extraProfiles = data.profiles || {};
-      } catch {
-        // Ignorer l'erreur
-      }
-
+      // Les profils Supabase contiennent déjà display_name et bio (si colonnes ajoutées)
       const friendsWithProfiles: FriendWithProfile[] = (friendsData || []).map(f => {
         const otherUserId = f.user_id === userId ? f.friend_id : f.user_id;
-        const baseProfile = otherUserId ? profileMap.get(otherUserId) || null : null;
-        const extra = otherUserId ? extraProfiles[otherUserId] : null;
+        const profile = otherUserId ? profileMap.get(otherUserId) || null : null;
         
         return {
           ...f,
-          profile: baseProfile ? {
-            ...baseProfile,
-            display_name: extra?.display_name || null,
-            bio: extra?.bio || null
-          } : null
+          profile: profile as Profile | null
         };
       });
 
