@@ -55,20 +55,26 @@ function saveTheme(theme: ThemeSettings) {
 }
 
 function applyTheme(theme: ThemeSettings) {
-  const root = document.documentElement;
+  // Trouver l'élément avec la classe .dark (ou le body)
+  const darkElement = document.querySelector('.dark') || document.documentElement;
   
-  // Appliquer la couleur d'accent
-  root.style.setProperty('--primary', theme.accentHsl);
-  root.style.setProperty('--accent', theme.accentHsl);
+  // Appliquer la couleur d'accent (format HSL pour Tailwind)
+  (darkElement as HTMLElement).style.setProperty('--primary', theme.accentHsl);
+  (darkElement as HTMLElement).style.setProperty('--accent', theme.accentHsl);
+  (darkElement as HTMLElement).style.setProperty('--ring', theme.accentHsl);
+  (darkElement as HTMLElement).style.setProperty('--sidebar-primary', theme.accentHsl);
+  (darkElement as HTMLElement).style.setProperty('--sidebar-ring', theme.accentHsl);
   
-  // Appliquer le fond de chat (via une variable CSS custom)
+  // Appliquer le fond de chat
   if (theme.chatBackground === 'default') {
-    root.style.removeProperty('--chat-background');
+    (darkElement as HTMLElement).style.removeProperty('--chat-bg');
   } else if (theme.chatBackgroundType === 'image' && theme.customBackgroundUrl) {
-    root.style.setProperty('--chat-background', `url(${theme.customBackgroundUrl})`);
+    (darkElement as HTMLElement).style.setProperty('--chat-bg', `url(${theme.customBackgroundUrl})`);
   } else {
-    root.style.setProperty('--chat-background', theme.chatBackground);
+    (darkElement as HTMLElement).style.setProperty('--chat-bg', theme.chatBackground);
   }
+  
+  console.log('🎨 Thème appliqué:', theme.accentHsl, 'sur', darkElement.tagName);
 }
 
 export function useTheme() {
