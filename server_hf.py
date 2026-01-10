@@ -1110,6 +1110,47 @@ async def debug_connections():
     }
 
 # ============================================================================
+# CHAT BACKGROUNDS - Synchronisation entre utilisateurs
+# ============================================================================
+
+# Stockage des fonds de chat par conversation
+chat_backgrounds: Dict[str, dict] = {}
+
+class ChatBackgroundUpdate(BaseModel):
+    """Mise à jour du fond de chat"""
+    conversation_id: str
+    background_url: str
+    set_by: str
+
+@app.post("/api/chat-background")
+async def set_chat_background(data: ChatBackgroundUpdate):
+    """Définir le fond d'une conversation"""
+    try:
+        chat_backgrounds[data.conversation_id] = {
+            "url": data.background_url,
+            "set_by": data.set_by,
+            "updated_at": generate_timestamp()
+        }
+        Logger.info(f"🖼️ Fond de chat mis à jour pour {data.conversation_id}")
+        return {"success": True, "background": chat_backgrounds[data.conversation_id]}
+    except Exception as e:
+        Logger.error(f"Erreur fond de chat: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/chat-background/{conversation_id}")
+async def get_chat_background(conversation_id: str):
+    """Récupérer le fond d'une conversation"""
+    bg = chat_backgrounds.get(conversation_id)
+    return {"background": bg}
+
+@app.delete("/api/chat-background/{conversation_id}")
+async def delete_chat_background(conversation_id: str):
+    """Supprimer le fond d'une conversation"""
+    if conversation_id in chat_backgrounds:
+        del chat_backgrounds[conversation_id]
+    return {"success": True}
+
+# ============================================================================
 # DISCORD BOT INTEGRATION
 # ============================================================================
 

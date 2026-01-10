@@ -1,17 +1,10 @@
-import { useState, useEffect, useCallback } from 'react';
-import { supabase } from '@/integrations/supabase/client';
-
-interface ChatBackground {
-  conversationId: string;
-  backgroundUrl: string;
-  setBy: string;
-  updatedAt: string;
-}
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { API_BASE_URL } from '@/config/api';
 
 const STORAGE_KEY = 'cyber-connect-chat-backgrounds';
 
 // Stockage local comme fallback
-function getLocalBackgrounds(): Record<string, ChatBackground> {
+function getLocalBackgrounds(): Record<string, string> {
   try {
     const stored = localStorage.getItem(STORAGE_KEY);
     return stored ? JSON.parse(stored) : {};
@@ -20,15 +13,22 @@ function getLocalBackgrounds(): Record<string, ChatBackground> {
   }
 }
 
-function saveLocalBackground(conversationId: string, bg: ChatBackground) {
+function saveLocalBackground(conversationId: string, url: string) {
   const all = getLocalBackgrounds();
-  all[conversationId] = bg;
+  all[conversationId] = url;
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(all));
+}
+
+function removeLocalBackground(conversationId: string) {
+  const all = getLocalBackgrounds();
+  delete all[conversationId];
   localStorage.setItem(STORAGE_KEY, JSON.stringify(all));
 }
 
 export function useChatBackground(conversationId: string | null, userId: string | undefined) {
   const [background, setBackground] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
   // Charger le fond au changement de conversation
   useEffect(() => {
@@ -40,67 +40,36 @@ export function useChatBackground(conversationId: string | null, userId: string 
     // D'abord charger depuis le local
     const local = getLocalBackgrounds()[conversationId];
     if (local) {
-      setBackground(local.backgroundUrl);
+      setBackground(local);
     }
 
-    // Puis essayer de charger depuis Supabase (metadata de conversation)
-    loadBackgroundFromDB(conversationId);
+    // Puis charger depuis le backend
+    loadBackgroundFromServer(conversationId);
 
-    // Écouter les changements en temps réel
-    const channel = supabase
-      .channel(`conv-bg-${conversationId}`)
-      .on(
-        'postgres_changes',
-        {
-          event: 'UPDATE',
-          schema: 'public',
-          table: 'conversations',
-          filter: `id=eq.${conversationId}`
-        },
-        (payload) => {
-          console.log('📸 Fond de conversation mis à jour:', payload);
-          const newMetadata = (payload.new as any)?.metadata;
-          if (newMetadata?.background_url) {
-            setBackground(newMetadata.background_url);
-            saveLocalBackground(conversationId, {
-              conversationId,
-              backgroundUrl: newMetadata.background_url,
-              setBy: newMetadata.background_set_by || '',
-              updatedAt: newMetadata.background_updated_at || new Date().toISOString()
-            });
-          } else if (newMetadata && !newMetadata.background_url) {
-            // Fond supprimé
-            setBackground(null);
-          }
-        }
-      )
-      .subscribe();
+    // Polling toutes les 3 secondes pour sync en temps réel
+    pollIntervalRef.current = setInterval(() => {
+      loadBackgroundFromServer(conversationId);
+    }, 3000);
 
     return () => {
-      supabase.removeChannel(channel);
+      if (pollIntervalRef.current) {
+        clearInterval(pollIntervalRef.current);
+      }
     };
   }, [conversationId]);
 
-  const loadBackgroundFromDB = async (convId: string) => {
+  const loadBackgroundFromServer = async (convId: string) => {
     try {
-      const { data, error } = await supabase
-        .from('conversations')
-        .select('metadata')
-        .eq('id', convId)
-        .single();
-
-      if (!error && data?.metadata?.background_url) {
-        setBackground(data.metadata.background_url);
-        // Mettre à jour le cache local
-        saveLocalBackground(convId, {
-          conversationId: convId,
-          backgroundUrl: data.metadata.background_url,
-          setBy: data.metadata.background_set_by || '',
-          updatedAt: data.metadata.background_updated_at || new Date().toISOString()
-        });
+      const response = await fetch(`${API_BASE_URL}/api/chat-background/${convId}`);
+      if (response.ok) {
+        const data = await response.json();
+        if (data.background?.url) {
+          setBackground(data.background.url);
+          saveLocalBackground(convId, data.background.url);
+        }
       }
     } catch (e) {
-      console.log('Fond depuis local uniquement');
+      // Utiliser le local en cas d'erreur
     }
   };
 
@@ -110,29 +79,22 @@ export function useChatBackground(conversationId: string | null, userId: string 
     setLoading(true);
     try {
       // Sauvegarder en local immédiatement
-      const bgData: ChatBackground = {
-        conversationId,
-        backgroundUrl: url,
-        setBy: userId,
-        updatedAt: new Date().toISOString()
-      };
-      saveLocalBackground(conversationId, bgData);
+      saveLocalBackground(conversationId, url);
       setBackground(url);
 
-      // Essayer de sauvegarder dans Supabase
-      const { error } = await supabase
-        .from('conversations')
-        .update({
-          metadata: {
-            background_url: url,
-            background_set_by: userId,
-            background_updated_at: new Date().toISOString()
-          }
+      // Sauvegarder sur le backend
+      const response = await fetch(`${API_BASE_URL}/api/chat-background`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          conversation_id: conversationId,
+          background_url: url,
+          set_by: userId
         })
-        .eq('id', conversationId);
+      });
 
-      if (error) {
-        console.log('Fond sauvegardé localement uniquement:', error.message);
+      if (!response.ok) {
+        console.log('Fond sauvegardé localement uniquement');
       }
 
       return { error: null };
@@ -147,17 +109,14 @@ export function useChatBackground(conversationId: string | null, userId: string 
     if (!conversationId) return;
 
     // Supprimer du local
-    const all = getLocalBackgrounds();
-    delete all[conversationId];
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(all));
+    removeLocalBackground(conversationId);
     setBackground(null);
 
-    // Essayer de supprimer de Supabase
+    // Supprimer du backend
     try {
-      await supabase
-        .from('conversations')
-        .update({ metadata: {} })
-        .eq('id', conversationId);
+      await fetch(`${API_BASE_URL}/api/chat-background/${conversationId}`, {
+        method: 'DELETE'
+      });
     } catch (e) {
       console.log('Suppression locale uniquement');
     }
