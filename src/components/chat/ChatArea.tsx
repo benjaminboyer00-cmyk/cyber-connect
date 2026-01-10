@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { Send, Image, Phone, Video, MoreVertical, Users, X, Loader2, Mic, Square, Trash2, UserMinus } from 'lucide-react';
+import { Send, Image, Phone, Video, MoreVertical, Users, X, Loader2, Mic, Square, Trash2, UserMinus, Smile, Search } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -24,6 +24,8 @@ import {
 import { useChunkUpload } from '@/hooks/useChunkUpload';
 import { useVoiceRecorder } from '@/hooks/useVoiceRecorder';
 import { MessageBubble } from './MessageBubble';
+import { GifPicker } from './GifPicker';
+import { DiscordBotSettings } from '../settings/DiscordBotSettings';
 import { toast } from 'sonner';
 import type { Tables } from '@/integrations/supabase/types';
 import type { MessageWithSender } from '@/hooks/useMessages';
@@ -65,6 +67,11 @@ export function ChatArea({
   const [selectedImage, setSelectedImage] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [removeDialogOpen, setRemoveDialogOpen] = useState(false);
+  const [gifPickerOpen, setGifPickerOpen] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [replyingTo, setReplyingTo] = useState<MessageWithSender | null>(null);
+  const [discordSettingsOpen, setDiscordSettingsOpen] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { uploadFileByChunks, uploading, progress, reset: resetUpload } = useChunkUpload();
@@ -266,6 +273,17 @@ export function ChatArea({
               </Button>
             </>
           )}
+          {/* Bouton Recherche */}
+          <Button 
+            variant="ghost" 
+            size="icon" 
+            className="text-muted-foreground hover:text-foreground"
+            onClick={() => setSearchOpen(!searchOpen)}
+            title="Rechercher dans la conversation"
+          >
+            <Search className="w-5 h-5" />
+          </Button>
+
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="ghost" size="icon" className="text-muted-foreground hover:text-foreground">
@@ -273,8 +291,16 @@ export function ChatArea({
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
+              <DropdownMenuItem 
+                className="cursor-pointer"
+                onClick={() => setDiscordSettingsOpen(true)}
+              >
+                <span className="mr-2">🤖</span>
+                Bots Discord
+              </DropdownMenuItem>
               {!isGroup && contact && onRemoveFriend && (
                 <>
+                  <DropdownMenuSeparator />
                   <DropdownMenuItem 
                     className="text-destructive focus:text-destructive cursor-pointer"
                     onClick={() => setRemoveDialogOpen(true)}
@@ -317,6 +343,45 @@ export function ChatArea({
         </AlertDialogContent>
       </AlertDialog>
 
+      {/* Dialog Discord Bots */}
+      <AlertDialog open={discordSettingsOpen} onOpenChange={setDiscordSettingsOpen}>
+        <AlertDialogContent className="max-w-md">
+          <AlertDialogHeader>
+            <AlertDialogTitle>🤖 Bots Discord</AlertDialogTitle>
+            <AlertDialogDescription>
+              Connectez des webhooks Discord pour relayer les messages.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <DiscordBotSettings conversationId={contact?.id || ''} />
+          <AlertDialogFooter>
+            <AlertDialogCancel>Fermer</AlertDialogCancel>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Barre de recherche */}
+      {searchOpen && (
+        <div className="px-4 py-2 border-b border-border bg-muted/30">
+          <div className="max-w-3xl mx-auto flex items-center gap-2">
+            <Search className="w-4 h-4 text-muted-foreground" />
+            <Input
+              placeholder="Rechercher dans les messages..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="flex-1 h-8 text-sm"
+              autoFocus
+            />
+            <Button 
+              variant="ghost" 
+              size="sm"
+              onClick={() => { setSearchOpen(false); setSearchQuery(''); }}
+            >
+              <X className="w-4 h-4" />
+            </Button>
+          </div>
+        </div>
+      )}
+
       {/* Messages */}
       <ScrollArea className="flex-1 p-6 scrollbar-thin">
         <div className="space-y-4 max-w-3xl mx-auto">
@@ -329,7 +394,9 @@ export function ChatArea({
               <p className="text-muted-foreground">Aucun message. Commencez la conversation !</p>
             </div>
           ) : (
-            messages.map((msg) => {
+            messages
+              .filter(msg => !searchQuery || msg.content?.toLowerCase().includes(searchQuery.toLowerCase()))
+              .map((msg) => {
               const isOwn = msg.sender_id === currentUserId;
               
               return (
@@ -339,6 +406,7 @@ export function ChatArea({
                   isOwn={isOwn}
                   currentUserId={currentUserId || ''}
                   formatTime={formatTime}
+                  onReply={(m) => setReplyingTo(m)}
                 />
               );
             })
@@ -457,6 +525,27 @@ export function ChatArea({
           >
             {isRecording ? <Square className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
           </Button>
+
+          {/* Bouton GIF */}
+          <div className="relative">
+            <Button 
+              variant="ghost" 
+              size="icon" 
+              className="text-muted-foreground hover:text-foreground shrink-0"
+              onClick={() => setGifPickerOpen(!gifPickerOpen)}
+              disabled={uploading || isRecording}
+            >
+              <span className="text-xs font-bold">GIF</span>
+            </Button>
+            <GifPicker 
+              isOpen={gifPickerOpen}
+              onClose={() => setGifPickerOpen(false)}
+              onSelectGif={(gifUrl) => {
+                onSendMessage('', gifUrl);
+                setGifPickerOpen(false);
+              }}
+            />
+          </div>
           
           <Input
             placeholder="Écrivez un message..."

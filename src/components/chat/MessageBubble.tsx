@@ -53,16 +53,22 @@ function SpotifyEmbed({ type, id }: { type: string; id: string }) {
   );
 }
 
+// Réactions disponibles
+const REACTIONS = ['👍', '❤️', '😂', '😮', '😢', '🔥'];
+
 interface MessageBubbleProps {
   message: MessageWithSender;
   isOwn: boolean;
   currentUserId: string;
   formatTime: (dateStr: string | null) => string;
+  onReply?: (message: MessageWithSender) => void;
+  onReaction?: (messageId: string, emoji: string) => void;
 }
 
-export function MessageBubble({ message, isOwn, currentUserId, formatTime }: MessageBubbleProps) {
+export function MessageBubble({ message, isOwn, currentUserId, formatTime, onReply, onReaction }: MessageBubbleProps) {
   const [translation, setTranslation] = useState<string | null>(null);
   const [isTranslating, setIsTranslating] = useState(false);
+  const [showReactions, setShowReactions] = useState(false);
 
   const handleTranslate = async () => {
     if (!message.content || isTranslating || translation) return;
@@ -107,7 +113,36 @@ export function MessageBubble({ message, isOwn, currentUserId, formatTime }: Mes
         </Avatar>
       )}
       
-      <div className={`max-w-[70%] ${isOwn ? 'items-end' : 'items-start'}`}>
+      <div 
+        className={`max-w-[70%] ${isOwn ? 'items-end' : 'items-start'} group relative`}
+        onMouseEnter={() => setShowReactions(true)}
+        onMouseLeave={() => setShowReactions(false)}
+      >
+        {/* Menu réactions flottant */}
+        {showReactions && (
+          <div className={`absolute -top-8 ${isOwn ? 'right-0' : 'left-0'} flex items-center gap-0.5 bg-card border border-border rounded-full px-1 py-0.5 shadow-lg z-10`}>
+            {REACTIONS.map((emoji) => (
+              <button
+                key={emoji}
+                onClick={() => onReaction?.(message.id, emoji)}
+                className="hover:scale-125 transition-transform p-1 text-sm"
+                title={`Réagir avec ${emoji}`}
+              >
+                {emoji}
+              </button>
+            ))}
+            {onReply && (
+              <button
+                onClick={() => onReply(message)}
+                className="hover:bg-muted rounded p-1 ml-1 text-xs text-muted-foreground"
+                title="Répondre"
+              >
+                ↩️
+              </button>
+            )}
+          </div>
+        )}
+
         <div className="flex items-start gap-1">
           {/* Bouton traduire - seulement pour les messages reçus avec du texte */}
           {!isOwn && message.content && !isAudio && (
