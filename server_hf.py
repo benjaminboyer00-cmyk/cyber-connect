@@ -104,6 +104,7 @@ class MessagePayload(BaseModel):
     sender_id: str = Field(..., min_length=1, max_length=100)
     conversation_id: str = Field(..., min_length=1, max_length=100)
     image_url: Optional[str] = Field(None, max_length=2000)
+    reply_to_id: Optional[str] = Field(None, max_length=100)
     
     @validator('content', pre=True, always=True)
     def validate_content_or_image(cls, v, values):
@@ -558,6 +559,7 @@ async def send_message(payload: MessagePayload):
             "sender_id": payload.sender_id,
             "conversation_id": payload.conversation_id,
             "image_url": payload.image_url,
+            "reply_to_id": payload.reply_to_id,
             "is_read": False,
             "created_at": generate_timestamp(),
             "_encrypted": encryption_success
