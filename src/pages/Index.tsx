@@ -69,6 +69,7 @@ export default function Index() {
   const [discordBotsModalOpen, setDiscordBotsModalOpen] = useState(false);
   const [themeModalOpen, setThemeModalOpen] = useState(false);
   const [profileModalOpen, setProfileModalOpen] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   
   // Réactions
   const { addReaction, getReactionCounts, hasUserReacted } = useReactions(user?.id);
@@ -221,6 +222,8 @@ export default function Index() {
         onOpenDiscordBots={() => setDiscordBotsModalOpen(true)}
         onOpenTheme={() => setThemeModalOpen(true)}
         onOpenProfile={() => setProfileModalOpen(true)}
+        isMobileOpen={sidebarOpen}
+        onCloseMobile={() => setSidebarOpen(false)}
       />
       
       <ChatArea
@@ -245,12 +248,14 @@ export default function Index() {
         onReaction={addReaction}
         getReactionCounts={getReactionCounts}
         hasUserReacted={hasUserReacted}
+        pinnedMessages={pinnedMessages}
         isMessagePinned={isMessagePinned}
         onPinMessage={pinMessage}
         onUnpinMessage={unpinMessage}
         chatBackground={chatBackground}
         onSetChatBackground={(url) => setConversationBackground(url)}
         onClearChatBackground={clearBackground}
+        onOpenSidebar={() => setSidebarOpen(true)}
       />
 
       {/* Modal appel entrant */}
