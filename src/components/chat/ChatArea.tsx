@@ -52,6 +52,7 @@ interface ChatAreaProps {
   getReactionCounts?: (messageId: string) => { [emoji: string]: number };
   hasUserReacted?: (messageId: string, emoji: string) => boolean;
   // Messages épinglés
+  pinnedMessages?: MessageWithSender[];
   isMessagePinned?: (messageId: string) => boolean;
   onPinMessage?: (messageId: string) => void;
   onUnpinMessage?: (messageId: string) => void;
@@ -77,6 +78,7 @@ export function ChatArea({
   onReaction,
   getReactionCounts,
   hasUserReacted,
+  pinnedMessages = [],
   isMessagePinned,
   onPinMessage,
   onUnpinMessage,
@@ -602,6 +604,21 @@ export function ChatArea({
                 Arrêter
               </Button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Barre de réponse */}
+      {replyingTo && (
+        <div className="px-4 py-2 border-t border-border bg-primary/10">
+          <div className="max-w-3xl mx-auto flex items-center justify-between">
+            <div className="flex items-center gap-2 flex-1 min-w-0">
+              <span className="text-xs text-primary font-medium">↩️ Réponse à {replyingTo.sender?.username}:</span>
+              <span className="text-xs text-muted-foreground truncate">{replyingTo.content?.slice(0, 50) || '📎 Fichier'}</span>
+            </div>
+            <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setReplyingTo(null)}>
+              <X className="w-4 h-4" />
+            </Button>
           </div>
         </div>
       )}

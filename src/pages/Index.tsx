@@ -248,6 +248,7 @@ export default function Index() {
         onReaction={addReaction}
         getReactionCounts={getReactionCounts}
         hasUserReacted={hasUserReacted}
+        pinnedMessages={messages.filter(m => isMessagePinned(m.id))}
         isMessagePinned={isMessagePinned}
         onPinMessage={pinMessage}
         onUnpinMessage={unpinMessage}
