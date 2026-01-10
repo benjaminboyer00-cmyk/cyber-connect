@@ -9,6 +9,8 @@ import { useSignaling } from '@/hooks/useSignaling';
 import { useWebRTC } from '@/hooks/useWebRTC';
 import { useHeartbeat } from '@/hooks/useHeartbeat';
 import { useReactions } from '@/hooks/useReactions';
+import { useTheme } from '@/hooks/useTheme';
+import { usePinnedMessages } from '@/hooks/usePinnedMessages';
 import { Sidebar } from '@/components/chat/Sidebar';
 import { ChatArea } from '@/components/chat/ChatArea';
 import { SearchUsersModal } from '@/components/friends/SearchUsersModal';
@@ -18,6 +20,8 @@ import { CreateGroupModal } from '@/components/friends/CreateGroupModal';
 import { IncomingCallModal } from '@/components/chat/IncomingCallModal';
 import { CallInterface } from '@/components/chat/CallInterface';
 import { DiscordBotSettings } from '@/components/settings/DiscordBotSettings';
+import { ThemeSettings } from '@/components/settings/ThemeSettings';
+import { ProfileSettings } from '@/components/settings/ProfileSettings';
 import {
   AlertDialog,
   AlertDialogContent,
@@ -62,9 +66,17 @@ export default function Index() {
   const [newChatModalOpen, setNewChatModalOpen] = useState(false);
   const [createGroupModalOpen, setCreateGroupModalOpen] = useState(false);
   const [discordBotsModalOpen, setDiscordBotsModalOpen] = useState(false);
+  const [themeModalOpen, setThemeModalOpen] = useState(false);
+  const [profileModalOpen, setProfileModalOpen] = useState(false);
   
   // Réactions
   const { addReaction, getReactionCounts, hasUserReacted } = useReactions(user?.id);
+  
+  // Messages épinglés
+  const { pinMessage, unpinMessage, isMessagePinned } = usePinnedMessages(selectedConversation, user?.id);
+  
+  // Thème
+  useTheme(); // Initialise le thème au chargement
 
   const { messages, loading: messagesLoading, sendMessage } = useMessages(selectedConversation, user?.id);
 
@@ -203,6 +215,8 @@ export default function Index() {
           await updateProfile({ avatar_url: avatarUrl });
         }}
         onOpenDiscordBots={() => setDiscordBotsModalOpen(true)}
+        onOpenTheme={() => setThemeModalOpen(true)}
+        onOpenProfile={() => setProfileModalOpen(true)}
       />
       
       <ChatArea
@@ -227,6 +241,9 @@ export default function Index() {
         onReaction={addReaction}
         getReactionCounts={getReactionCounts}
         hasUserReacted={hasUserReacted}
+        isMessagePinned={isMessagePinned}
+        onPinMessage={pinMessage}
+        onUnpinMessage={unpinMessage}
       />
 
       {/* Modal appel entrant */}
@@ -290,6 +307,41 @@ export default function Index() {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <DiscordBotSettings conversationId="global" />
+          <AlertDialogFooter>
+            <AlertDialogCancel>Fermer</AlertDialogCancel>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Modal Thème */}
+      <AlertDialog open={themeModalOpen} onOpenChange={setThemeModalOpen}>
+        <AlertDialogContent className="max-w-md">
+          <AlertDialogHeader>
+            <AlertDialogTitle>🎨 Personnalisation</AlertDialogTitle>
+            <AlertDialogDescription>
+              Personnalisez l'apparence de l'application.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <ThemeSettings />
+          <AlertDialogFooter>
+            <AlertDialogCancel>Fermer</AlertDialogCancel>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Modal Profil */}
+      <AlertDialog open={profileModalOpen} onOpenChange={setProfileModalOpen}>
+        <AlertDialogContent className="max-w-md">
+          <AlertDialogHeader>
+            <AlertDialogTitle>👤 Mon Profil</AlertDialogTitle>
+            <AlertDialogDescription>
+              Modifiez vos informations personnelles.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <ProfileSettings 
+            profile={profile}
+            onUpdateProfile={updateProfile}
+          />
           <AlertDialogFooter>
             <AlertDialogCancel>Fermer</AlertDialogCancel>
           </AlertDialogFooter>

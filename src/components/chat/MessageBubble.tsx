@@ -65,9 +65,12 @@ interface MessageBubbleProps {
   onReaction?: (messageId: string, emoji: string) => void;
   reactionCounts?: { [emoji: string]: number };
   hasUserReacted?: (messageId: string, emoji: string) => boolean;
+  isPinned?: boolean;
+  onPin?: (messageId: string) => void;
+  onUnpin?: (messageId: string) => void;
 }
 
-export function MessageBubble({ message, isOwn, currentUserId, formatTime, onReply, onReaction, reactionCounts, hasUserReacted }: MessageBubbleProps) {
+export function MessageBubble({ message, isOwn, currentUserId, formatTime, onReply, onReaction, reactionCounts, hasUserReacted, isPinned, onPin, onUnpin }: MessageBubbleProps) {
   const [translation, setTranslation] = useState<string | null>(null);
   const [isTranslating, setIsTranslating] = useState(false);
   const [showReactions, setShowReactions] = useState(false);
@@ -145,6 +148,15 @@ export function MessageBubble({ message, isOwn, currentUserId, formatTime, onRep
                 ↩️
               </button>
             )}
+            {(onPin || onUnpin) && (
+              <button
+                onClick={() => isPinned ? onUnpin?.(message.id) : onPin?.(message.id)}
+                className={`hover:bg-muted rounded p-1 ml-1 text-xs ${isPinned ? 'text-yellow-500' : 'text-muted-foreground'}`}
+                title={isPinned ? 'Désépingler' : 'Épingler'}
+              >
+                📌
+              </button>
+            )}
           </div>
         )}
 
@@ -173,8 +185,14 @@ export function MessageBubble({ message, isOwn, currentUserId, formatTime, onRep
                 isOwn
                   ? 'bg-gradient-to-r from-primary to-accent text-primary-foreground rounded-br-md'
                   : 'bg-muted text-foreground rounded-bl-md'
-              }`}
+              } ${isPinned ? 'ring-2 ring-yellow-500/50' : ''}`}
             >
+              {isPinned && (
+                <div className="flex items-center gap-1 text-[10px] text-yellow-500 mb-1">
+                  <span>📌</span>
+                  <span>Épinglé</span>
+                </div>
+              )}
               {message.image_url && (
                 isAudio ? (
                   <VoiceMessagePlayer src={message.image_url} isOwn={isOwn} />

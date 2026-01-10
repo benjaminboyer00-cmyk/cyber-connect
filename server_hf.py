@@ -1109,15 +1109,77 @@ async def debug_connections():
         "encryption_ready": encryption.initialized
     }
 
+# ============================================================================
+# DISCORD BOT INTEGRATION
+# ============================================================================
+
+# Stockage temporaire des messages Discord entrants (en mémoire)
+discord_messages: Dict[str, list] = {}
+
+class DiscordIncomingMessage(BaseModel):
+    """Message entrant depuis un bot Discord"""
+    channel_id: str
+    author: str
+    author_avatar: Optional[str] = None
+    content: str
+    timestamp: Optional[str] = None
+
+@app.post("/api/discord-incoming")
+async def receive_discord_message(message: DiscordIncomingMessage):
+    """Recevoir un message depuis un bot Discord"""
+    try:
+        channel_id = message.channel_id
+        
+        if channel_id not in discord_messages:
+            discord_messages[channel_id] = []
+        
+        # Ajouter le message avec timestamp
+        msg_data = {
+            "id": f"discord_{generate_timestamp()}_{len(discord_messages[channel_id])}",
+            "author": message.author,
+            "author_avatar": message.author_avatar,
+            "content": message.content,
+            "timestamp": message.timestamp or generate_timestamp(),
+            "source": "discord"
+        }
+        
+        discord_messages[channel_id].append(msg_data)
+        
+        # Garder seulement les 100 derniers messages par channel
+        if len(discord_messages[channel_id]) > 100:
+            discord_messages[channel_id] = discord_messages[channel_id][-100:]
+        
+        Logger.info(f"📥 Message Discord reçu de {message.author} dans #{channel_id}")
+        
+        return {"success": True, "message_id": msg_data["id"]}
+    except Exception as e:
+        Logger.error(f"Erreur réception Discord: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/discord-messages/{channel_id}")
+async def get_discord_messages(channel_id: str, since: Optional[str] = None):
+    """Récupérer les messages Discord d'un channel"""
+    try:
+        messages = discord_messages.get(channel_id, [])
+        
+        if since:
+            messages = [m for m in messages if m["timestamp"] > since]
+        
+        return {"messages": messages, "count": len(messages)}
+    except Exception as e:
+        Logger.error(f"Erreur récupération Discord: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.get("/api/health")
 async def health_check():
     """Health check pour Hugging Face Spaces"""
     return {
         "status": "healthy",
-        "version": "4.0.2",
+        "version": "4.0.3",
         "db": "connected" if db.connected else "disconnected",
         "encryption": "ready" if encryption.initialized else "not_ready",
         "timestamp": generate_timestamp(),
+        "discord_channels": len(discord_messages),
         "env_check": {
             "supabase_url_set": bool(Config.SUPABASE_URL),
             "supabase_key_set": bool(Config.SUPABASE_KEY),

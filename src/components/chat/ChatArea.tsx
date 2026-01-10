@@ -51,6 +51,10 @@ interface ChatAreaProps {
   onReaction?: (messageId: string, emoji: string) => void;
   getReactionCounts?: (messageId: string) => { [emoji: string]: number };
   hasUserReacted?: (messageId: string, emoji: string) => boolean;
+  // Messages épinglés
+  isMessagePinned?: (messageId: string) => boolean;
+  onPinMessage?: (messageId: string) => void;
+  onUnpinMessage?: (messageId: string) => void;
 }
 
 export function ChatArea({ 
@@ -69,6 +73,9 @@ export function ChatArea({
   onReaction,
   getReactionCounts,
   hasUserReacted,
+  isMessagePinned,
+  onPinMessage,
+  onUnpinMessage,
 }: ChatAreaProps) {
   const [message, setMessage] = useState('');
   const [selectedImage, setSelectedImage] = useState<File | null>(null);
@@ -417,6 +424,9 @@ export function ChatArea({
                   onReaction={onReaction}
                   reactionCounts={getReactionCounts?.(msg.id)}
                   hasUserReacted={hasUserReacted}
+                  isPinned={isMessagePinned?.(msg.id)}
+                  onPin={onPinMessage}
+                  onUnpin={onUnpinMessage}
                 />
               );
             })

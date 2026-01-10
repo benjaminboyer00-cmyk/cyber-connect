@@ -297,9 +297,17 @@ export function DiscordBotSettings({ conversationId, onWebhookSend }: DiscordBot
               
               <ol className="text-xs text-muted-foreground space-y-2 list-decimal list-inside">
                 <li>Créez un bot sur <a href="https://discord.com/developers/applications" target="_blank" rel="noopener" className="text-primary underline">Discord Developer Portal</a></li>
-                <li>Invitez le bot sur votre serveur avec les permissions "Lire les messages"</li>
-                <li>Configurez votre bot pour envoyer les messages vers l'URL ci-dessous</li>
+                <li>Invitez le bot sur votre serveur</li>
+                <li>Configurez le bot pour POST vers l'URL ci-dessous avec le format JSON:</li>
               </ol>
+              
+              <pre className="text-[10px] bg-background p-2 rounded mt-2 overflow-x-auto">
+{`{
+  "channel_id": "123456789",
+  "author": "Username",
+  "content": "Message text"
+}`}
+              </pre>
 
               <div className="space-y-2">
                 <Label className="text-xs">URL Webhook (pour votre bot)</Label>

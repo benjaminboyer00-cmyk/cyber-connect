@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { LogOut, Search, UserPlus, MessageSquarePlus, Users, Trash2, Shuffle, Bot } from 'lucide-react';
+import { LogOut, Search, UserPlus, MessageSquarePlus, Users, Trash2, Shuffle, Bot, Palette } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -45,6 +45,8 @@ interface SidebarProps {
   onCreateGroup: () => void;
   onUpdateAvatar?: (avatarUrl: string) => Promise<void>;
   onOpenDiscordBots?: () => void;
+  onOpenTheme?: () => void;
+  onOpenProfile?: () => void;
 }
 
 export function Sidebar({
@@ -60,7 +62,9 @@ export function Sidebar({
   onViewRequests,
   onCreateGroup,
   onUpdateAvatar,
-  onOpenDiscordBots
+  onOpenDiscordBots,
+  onOpenTheme,
+  onOpenProfile
 }: SidebarProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
@@ -138,7 +142,10 @@ export function Sidebar({
                 ))}
               </DropdownMenuContent>
             </DropdownMenu>
-            <div>
+            <div 
+              className={onOpenProfile ? 'cursor-pointer hover:opacity-80' : ''}
+              onClick={onOpenProfile}
+            >
               <p className="font-semibold text-sidebar-foreground">{profile?.username || 'Utilisateur'}</p>
               <div className="flex items-center gap-1">
                 <span className="w-2 h-2 rounded-full bg-green-500" />
@@ -206,6 +213,17 @@ export function Sidebar({
             title="Bots Discord"
           >
             <Bot className="w-4 h-4" />
+          </Button>
+        )}
+        {onOpenTheme && (
+          <Button 
+            variant="secondary" 
+            size="sm" 
+            className="gap-1 text-xs"
+            onClick={onOpenTheme}
+            title="Thème"
+          >
+            <Palette className="w-4 h-4" />
           </Button>
         )}
       </div>
