@@ -68,12 +68,18 @@ interface MessageBubbleProps {
   isPinned?: boolean;
   onPin?: (messageId: string) => void;
   onUnpin?: (messageId: string) => void;
+  allMessages?: MessageWithSender[];
 }
 
-export function MessageBubble({ message, isOwn, currentUserId, formatTime, onReply, onReaction, reactionCounts, hasUserReacted, isPinned, onPin, onUnpin }: MessageBubbleProps) {
+export function MessageBubble({ message, isOwn, currentUserId, formatTime, onReply, onReaction, reactionCounts, hasUserReacted, isPinned, onPin, onUnpin, allMessages = [] }: MessageBubbleProps) {
   const [translation, setTranslation] = useState<string | null>(null);
   const [isTranslating, setIsTranslating] = useState(false);
   const [showReactions, setShowReactions] = useState(false);
+  
+  // Trouver le message auquel on répond
+  const replyToMessage = (message as any).reply_to_id 
+    ? allMessages.find(m => m.id === (message as any).reply_to_id) 
+    : null;
   
   // Vérifier s'il y a des réactions
   const hasReactions = reactionCounts && Object.keys(reactionCounts).length > 0;
@@ -187,6 +193,24 @@ export function MessageBubble({ message, isOwn, currentUserId, formatTime, onRep
                   : 'bg-muted text-foreground rounded-bl-md'
               } ${isPinned ? 'ring-2 ring-yellow-500/50' : ''}`}
             >
+              {/* Message de réponse (style WhatsApp) */}
+              {replyToMessage && (
+                <div 
+                  className={`mb-2 p-2 rounded-lg border-l-4 ${isOwn ? 'bg-white/10 border-white/50' : 'bg-primary/10 border-primary/50'} cursor-pointer`}
+                  onClick={() => {
+                    const el = document.getElementById(`msg-${replyToMessage.id}`);
+                    el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                  }}
+                >
+                  <p className={`text-xs font-medium ${isOwn ? 'text-white/80' : 'text-primary'}`}>
+                    ↩️ {replyToMessage.sender?.username || 'Utilisateur'}
+                  </p>
+                  <p className={`text-xs truncate ${isOwn ? 'text-white/60' : 'text-muted-foreground'}`}>
+                    {replyToMessage.content?.slice(0, 50) || '📎 Fichier'}
+                    {(replyToMessage.content?.length || 0) > 50 ? '...' : ''}
+                  </p>
+                </div>
+              )}
               {isPinned && (
                 <div className="flex items-center gap-1 text-[10px] text-yellow-500 mb-1">
                   <span>📌</span>

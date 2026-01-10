@@ -520,6 +520,7 @@ export function ChatArea({
                   isPinned={isMessagePinned?.(msg.id)}
                   onPin={onPinMessage}
                   onUnpin={onUnpinMessage}
+                  allMessages={messages}
                 />
               );
             })

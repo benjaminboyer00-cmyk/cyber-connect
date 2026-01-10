@@ -18,6 +18,8 @@ type Profile = Tables<'profiles'>;
 
 export interface MessageWithSender extends Message {
   sender: Profile | null;
+  reply_to_id?: string | null;
+  replyTo?: MessageWithSender | null;
 }
 
 export function useMessages(conversationId: string | null, userId: string | undefined) {
