@@ -65,16 +65,24 @@ function applyTheme(theme: ThemeSettings) {
   (darkElement as HTMLElement).style.setProperty('--sidebar-primary', theme.accentHsl);
   (darkElement as HTMLElement).style.setProperty('--sidebar-ring', theme.accentHsl);
   
-  // Appliquer le fond de chat
+  // Appliquer le fond de chat global directement sur le body ou l'élément principal
+  const chatArea = document.querySelector('[data-chat-area]') || document.body;
+  
   if (theme.chatBackground === 'default') {
-    (darkElement as HTMLElement).style.removeProperty('--chat-bg');
+    (chatArea as HTMLElement).style.removeProperty('background');
+    (chatArea as HTMLElement).style.removeProperty('background-image');
   } else if (theme.chatBackgroundType === 'image' && theme.customBackgroundUrl) {
-    (darkElement as HTMLElement).style.setProperty('--chat-bg', `url(${theme.customBackgroundUrl})`);
+    (chatArea as HTMLElement).style.background = `url(${theme.customBackgroundUrl}) center/cover no-repeat`;
+  } else if (theme.chatBackgroundType === 'gradient') {
+    (chatArea as HTMLElement).style.background = theme.chatBackground;
   } else {
-    (darkElement as HTMLElement).style.setProperty('--chat-bg', theme.chatBackground);
+    (chatArea as HTMLElement).style.backgroundColor = theme.chatBackground;
   }
   
-  console.log('🎨 Thème appliqué:', theme.accentHsl, 'sur', darkElement.tagName);
+  // Stocker dans une variable CSS pour utilisation dans les composants
+  (darkElement as HTMLElement).style.setProperty('--theme-chat-bg', theme.chatBackground);
+  
+  console.log('🎨 Thème appliqué:', theme.accentHsl);
 }
 
 export function useTheme() {

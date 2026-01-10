@@ -240,7 +240,7 @@ export function ChatArea({
     : (contact?.status === 'online' ? 'En ligne' : 'Hors ligne');
 
   return (
-    <div className="flex-1 flex flex-col bg-background">
+    <div className="flex-1 flex flex-col bg-background" data-chat-area>
       {/* Header */}
       <div className="h-16 px-6 border-b border-border flex items-center justify-between bg-card/50 backdrop-blur-sm">
         <div className="flex items-center gap-3">
