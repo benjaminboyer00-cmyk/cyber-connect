@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
+import { API_BASE_URL } from '@/config/api';
 import type { Tables } from '@/integrations/supabase/types';
 
-type Profile = Tables<'profiles'>;
+type Profile = Tables<'profiles'> & { display_name?: string | null; bio?: string | null };
 
 // Styles d'avatars DiceBear disponibles
 export const AVATAR_STYLES = [
@@ -51,6 +52,7 @@ export function useProfile(userId: string | undefined) {
     }
 
     const fetchProfile = async () => {
+      // 1. Charger le profil Supabase
       const { data, error } = await supabase
         .from('profiles')
         .select('*')
@@ -58,7 +60,22 @@ export function useProfile(userId: string | undefined) {
         .maybeSingle();
 
       if (!error && data) {
-        setProfile(data);
+        // 2. Charger les infos supplémentaires du backend
+        try {
+          const res = await fetch(`${API_BASE_URL}/api/profile-extra/${userId}`);
+          const extraData = await res.json();
+          if (extraData.profile) {
+            setProfile({
+              ...data,
+              display_name: extraData.profile.display_name || null,
+              bio: extraData.profile.bio || null
+            });
+          } else {
+            setProfile(data);
+          }
+        } catch {
+          setProfile(data);
+        }
       }
       setLoading(false);
     };
@@ -69,15 +86,41 @@ export function useProfile(userId: string | undefined) {
   const updateProfile = async (updates: Partial<Profile>) => {
     if (!userId) return { error: new Error('No user') };
     
-    const { error } = await supabase
-      .from('profiles')
-      .update(updates)
-      .eq('id', userId);
-
-    if (!error) {
-      setProfile(prev => prev ? { ...prev, ...updates } : null);
+    // Séparer les updates Supabase des updates backend
+    const { display_name, bio, ...supabaseUpdates } = updates;
+    
+    // 1. Mettre à jour Supabase (si colonnes standard)
+    if (Object.keys(supabaseUpdates).length > 0) {
+      const { error } = await supabase
+        .from('profiles')
+        .update(supabaseUpdates)
+        .eq('id', userId);
+      if (error) return { error };
     }
-    return { error };
+    
+    // 2. Mettre à jour le backend (display_name, bio)
+    if (display_name !== undefined || bio !== undefined) {
+      try {
+        const res = await fetch(`${API_BASE_URL}/api/profile-extra`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            user_id: userId,
+            display_name: display_name,
+            bio: bio
+          })
+        });
+        
+        if (!res.ok) {
+          return { error: new Error('Erreur sauvegarde profil') };
+        }
+      } catch (e) {
+        return { error: e as Error };
+      }
+    }
+
+    setProfile(prev => prev ? { ...prev, ...updates } : null);
+    return { error: null };
   };
 
   /**

@@ -1110,6 +1110,44 @@ async def debug_connections():
     }
 
 # ============================================================================
+# USER PROFILE EXTRAS - display_name & bio
+# ============================================================================
+
+# Stockage des infos profil supplémentaires
+user_profiles_extra: Dict[str, dict] = {}
+
+class ProfileUpdate(BaseModel):
+    """Mise à jour du profil utilisateur"""
+    user_id: str
+    display_name: Optional[str] = None
+    bio: Optional[str] = None
+
+@app.post("/api/profile-extra")
+async def update_profile_extra(data: ProfileUpdate):
+    """Mettre à jour display_name et bio"""
+    try:
+        if data.user_id not in user_profiles_extra:
+            user_profiles_extra[data.user_id] = {}
+        
+        if data.display_name is not None:
+            user_profiles_extra[data.user_id]["display_name"] = data.display_name
+        if data.bio is not None:
+            user_profiles_extra[data.user_id]["bio"] = data.bio
+        
+        user_profiles_extra[data.user_id]["updated_at"] = generate_timestamp()
+        
+        Logger.info(f"👤 Profil mis à jour: {data.user_id}")
+        return {"success": True, "profile": user_profiles_extra[data.user_id]}
+    except Exception as e:
+        Logger.error(f"Erreur profil: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/profile-extra/{user_id}")
+async def get_profile_extra(user_id: str):
+    """Récupérer les infos profil supplémentaires"""
+    return {"profile": user_profiles_extra.get(user_id, {})}
+
+# ============================================================================
 # CHAT BACKGROUNDS - Synchronisation entre utilisateurs
 # ============================================================================
 
