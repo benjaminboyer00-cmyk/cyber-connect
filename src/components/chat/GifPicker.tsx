@@ -112,7 +112,7 @@ export function GifPicker({ isOpen, onClose, onSelectGif }: GifPickerProps) {
             placeholder="Rechercher un GIF..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="pl-8 h-8 text-sm"
+            className="pl-8 h-8 text-sm bg-background text-foreground"
           />
         </div>
       </form>

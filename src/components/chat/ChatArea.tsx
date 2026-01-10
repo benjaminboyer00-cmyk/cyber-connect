@@ -375,7 +375,7 @@ export function ChatArea({
               placeholder="Rechercher dans les messages..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="flex-1 h-8 text-sm"
+              className="flex-1 h-8 text-sm bg-background text-foreground"
               autoFocus
             />
             <Button 
