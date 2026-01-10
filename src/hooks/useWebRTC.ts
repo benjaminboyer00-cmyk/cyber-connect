@@ -264,17 +264,26 @@ export const useWebRTC = (
     pc.ontrack = (event) => {
       console.log('📥 Track distant reçu:', event.track.kind, 'muted:', event.track.muted);
       
+      // Gestionnaires pour les tracks muets
+      event.track.onmute = () => {
+        console.log('⚠️ Track distant muet:', event.track.kind);
+      };
+      
+      event.track.onunmute = () => {
+        console.log('✅ Track distant restauré:', event.track.kind);
+      };
+      
+      event.track.onended = () => {
+        console.log('🔇 Track distant terminé:', event.track.kind);
+      };
+      
       if (event.streams && event.streams[0]) {
         setRemoteStream(event.streams[0]);
       } else {
         // Créer un MediaStream si pas fourni
-        setRemoteStream(prev => {
-          const stream = prev || new MediaStream();
-          if (!stream.getTracks().find(t => t.id === event.track.id)) {
-            stream.addTrack(event.track);
-          }
-          return stream;
-        });
+        const stream = new MediaStream();
+        stream.addTrack(event.track);
+        setRemoteStream(stream);
       }
     };
 
@@ -563,48 +572,33 @@ export const useWebRTC = (
       const pc = createPeerConnection(callerId);
       peerConnectionRef.current = pc;
 
-      // 3. DÉFINIR L'OFFRE DISTANTE D'ABORD (crée les transceivers!)
-      await pc.setRemoteDescription(new RTCSessionDescription(storedOffer));
-      isRemoteDescriptionSet.current = true;
-      console.log('✅ Remote description set');
-
-      // 4. MAINTENANT récupérer les transceivers créés par l'offre et y attacher nos tracks
+      // 3. AJOUTER LES TRACKS LOCAUX AVANT de définir l'offre distante
       if (localStreamRef.current) {
         const tracks = localStreamRef.current.getTracks();
-        const transceivers = pc.getTransceivers();
-        console.log(`📤 CALLEE: Ajout de ${tracks.length} tracks, ${transceivers.length} transceivers`);
+        console.log(`📤 CALLEE: Ajout de ${tracks.length} tracks locaux AVANT setRemoteDescription`);
         
         tracks.forEach(track => {
           console.log(`📤 Ajout track: ${track.kind}, enabled=${track.enabled}`);
-          
-          // Trouver le transceiver correspondant (créé par l'offre) et y attacher notre track
-          const transceiver = transceivers.find(t => 
-            t.receiver.track?.kind === track.kind && 
-            (!t.sender.track || t.sender.track.id !== track.id)
-          );
-          
-          if (transceiver) {
-            transceiver.sender.replaceTrack(track);
-            if (transceiver.direction === 'recvonly') {
-              transceiver.direction = 'sendrecv';
-            }
-            console.log(`✅ Track ${track.kind} attaché au transceiver (dir: ${transceiver.direction})`);
-          } else {
-            // Créer un nouveau transceiver si nécessaire
-            pc.addTrack(track, localStreamRef.current!);
-            console.log(`✅ Track ${track.kind} ajouté via addTrack`);
-          }
+          pc.addTrack(track, localStreamRef.current!);
         });
       } else {
         console.error('❌ CALLEE: PAS DE STREAM LOCAL!');
         throw new Error('Stream local non disponible');
       }
 
+      // 4. DÉFINIR L'OFFRE DISTANTE
+      await pc.setRemoteDescription(new RTCSessionDescription(storedOffer));
+      isRemoteDescriptionSet.current = true;
+      console.log('✅ Remote description set');
+
       // 5. Traiter les candidats ICE en attente
       await processPendingCandidates();
 
       // 6. CRÉER LA RÉPONSE
-      const answer = await pc.createAnswer();
+      const answer = await pc.createAnswer({
+        offerToReceiveAudio: true,
+        offerToReceiveVideo: callTypeRef.current === 'video'
+      });
       
       if (!answer.type) {
         (answer as any).type = 'answer';
