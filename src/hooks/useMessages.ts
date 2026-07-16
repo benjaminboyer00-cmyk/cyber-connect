@@ -21,6 +21,8 @@ export interface MessageWithSender extends Message {
   sender: Profile | null;
   reply_to_id?: string | null;
   replyTo?: MessageWithSender | null;
+  /** Bulle affichée en optimiste avant confirmation serveur. */
+  _pending?: boolean;
 }
 
 export function useMessages(conversationId: string | null, userId: string | undefined) {
@@ -338,13 +340,30 @@ export function useMessages(conversationId: string | null, userId: string | unde
                 console.log('[Realtime] ⚠️ Message déjà présent, ignoré');
                 return prev;
               }
-              
+
               const messageWithSender: MessageWithSender = {
                 ...newMessage,
                 content: decryptedContent,
                 sender: senderProfile
               };
-              
+
+              // Réconciliation optimiste : si c'est notre propre message qui
+              // revient du serveur, on remplace la bulle "en attente" au lieu
+              // d'en ajouter une seconde (évite le doublon).
+              if (newMessage.sender_id === userIdRef.current) {
+                const idx = prev.findIndex(m =>
+                  m._pending &&
+                  m.content === decryptedContent &&
+                  (m.image_url || null) === (newMessage.image_url || null)
+                );
+                if (idx !== -1) {
+                  const copy = [...prev];
+                  copy[idx] = messageWithSender;
+                  console.log('[Realtime] ♻️ Bulle optimiste réconciliée:', messageWithSender.id);
+                  return copy;
+                }
+              }
+
               console.log('[Realtime] ✅ Message ajouté:', messageWithSender.id);
               return [...prev, messageWithSender];
             });
@@ -423,6 +442,24 @@ export function useMessages(conversationId: string | null, userId: string | unde
       return { error: new Error('Invalid state: missing conversationId or userId') };
     }
 
+    // UI optimiste : on affiche immédiatement une bulle "en attente".
+    // Elle sera réconciliée (ou remplacée) quand le message reviendra en
+    // Realtime, et retirée si l'envoi échoue.
+    const tempId = `temp-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const optimisticMessage: MessageWithSender = {
+      id: tempId,
+      conversation_id: conversationId,
+      sender_id: userId,
+      content,
+      image_url: imageUrl ?? null,
+      is_read: true,
+      created_at: new Date().toISOString(),
+      reply_to_id: replyToId ?? null,
+      sender: null,
+      _pending: true,
+    } as MessageWithSender;
+    safeSetState(setMessages, (prev: MessageWithSender[]) => [...prev, optimisticMessage]);
+
     try {
       console.log('[sendMessage] 📤 Envoi via serveur Python...');
       
@@ -474,12 +511,15 @@ export function useMessages(conversationId: string | null, userId: string | unde
 
     } catch (error) {
       console.error('[sendMessage] ❌ Erreur:', error);
-      
-      const errorMessage = error instanceof Error 
-        ? error.message 
+
+      // Rollback : on retire la bulle optimiste puisque l'envoi a échoué.
+      safeSetState(setMessages, (prev: MessageWithSender[]) => prev.filter(m => m.id !== tempId));
+
+      const errorMessage = error instanceof Error
+        ? error.message
         : 'Erreur de communication avec le serveur Python';
-      
-      return { 
+
+      return {
         error: new Error(
           `Échec de l'envoi via le serveur Python: ${errorMessage}. ` +
           'Vérifiez que le serveur est en cours d\'exécution.'

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Globe, Loader2, Music } from 'lucide-react';
+import { Globe, Loader2, Music, Check, Clock } from 'lucide-react';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { VoiceMessagePlayer } from './VoiceMessagePlayer';
@@ -187,11 +187,11 @@ export function MessageBubble({ message, isOwn, currentUserId, formatTime, onRep
           
           <div className="flex flex-col">
             <div
-              className={`px-3.5 py-2 rounded-lg border ${
+              className={`px-3.5 py-2 rounded-lg border transition-opacity ${
                 isOwn
                   ? 'bg-primary text-primary-foreground border-primary/60 rounded-br-sm'
                   : 'bg-card text-foreground border-border rounded-bl-sm'
-              } ${isPinned ? 'ring-1 ring-warning/60' : ''}`}
+              } ${isPinned ? 'ring-1 ring-warning/60' : ''} ${message._pending ? 'opacity-60' : ''}`}
             >
               {/* Message de réponse (style WhatsApp) */}
               {replyToMessage && (
@@ -272,8 +272,11 @@ export function MessageBubble({ message, isOwn, currentUserId, formatTime, onRep
           </div>
         )}
         
-        <p className={`font-mono-ds text-[0.65rem] text-muted-foreground/70 mt-1 ${isOwn ? 'text-right' : ''}`}>
+        <p className={`font-mono-ds text-[0.65rem] text-muted-foreground/70 mt-1 flex items-center gap-1 ${isOwn ? 'justify-end' : ''}`}>
           {formatTime(message.created_at)}
+          {isOwn && (message._pending
+            ? <Clock className="w-3 h-3" aria-label="Envoi en cours" />
+            : <Check className="w-3 h-3" aria-label="Envoyé" />)}
         </p>
       </div>
     </div>

@@ -230,6 +230,7 @@ export default function Index() {
       <div className={`${selectedConversation ? 'flex' : 'hidden md:flex'} flex-1 min-w-0`}>
       <ChatArea
         onBack={() => setSelectedConversation(null)}
+        conversationId={selectedConversation}
         contact={contact}
         messages={messages}
         currentUserId={user.id}

@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { Send, X, Search } from 'lucide-react';
+import { Send, X, Search, ArrowDown } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -53,6 +53,8 @@ interface ChatAreaProps {
   onClearChatBackground?: () => void;
   // Navigation mobile (retour vers la liste)
   onBack?: () => void;
+  // Identifiant de la conversation courante (clé de reset du défilement)
+  conversationId?: string | null;
 }
 
 export function ChatArea({
@@ -77,6 +79,7 @@ export function ChatArea({
   onSetChatBackground,
   onClearChatBackground,
   onBack,
+  conversationId,
 }: ChatAreaProps) {
   const [removeDialogOpen, setRemoveDialogOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -86,12 +89,67 @@ export function ChatArea({
   const [bgDialogOpen, setBgDialogOpen] = useState(false);
   const [bgUrl, setBgUrl] = useState('');
   const [profileModalOpen, setProfileModalOpen] = useState(false);
+  const [showNewPill, setShowNewPill] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const scrollRootRef = useRef<HTMLDivElement>(null);
+  const nearBottomRef = useRef(true);
+  const prevLenRef = useRef(0);
+  const convKeyRef = useRef<string | null | undefined>(undefined);
 
-  // Auto-scroll vers le dernier message
+  // Viewport interne du composant ScrollArea (Radix)
+  const getViewport = () =>
+    scrollRootRef.current?.querySelector<HTMLElement>('[data-radix-scroll-area-viewport]') || null;
+
+  const jumpToBottom = (behavior: ScrollBehavior = 'smooth') => {
+    const vp = getViewport();
+    if (vp) {
+      vp.scrollTo({ top: vp.scrollHeight, behavior });
+    } else {
+      messagesEndRef.current?.scrollIntoView({ behavior });
+    }
+    nearBottomRef.current = true;
+    setShowNewPill(false);
+  };
+
+  // Suit la position de défilement pour savoir si l'utilisateur est "en bas".
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+    const vp = getViewport();
+    if (!vp) return;
+    const onScroll = () => {
+      const distance = vp.scrollHeight - vp.scrollTop - vp.clientHeight;
+      nearBottomRef.current = distance < 120;
+      if (nearBottomRef.current) setShowNewPill(false);
+    };
+    vp.addEventListener('scroll', onScroll, { passive: true });
+    return () => vp.removeEventListener('scroll', onScroll);
+  }, [contact, isGroup]);
+
+  // Auto-scroll intelligent : on ne force le bas que si l'utilisateur y était
+  // déjà (ou si c'est son propre message). Sinon, on propose une pastille.
+  useEffect(() => {
+    const len = messages.length;
+    const convChanged = convKeyRef.current !== conversationId;
+    const isInitialLoad = prevLenRef.current === 0 && len > 0;
+    const lastIsOwn = len > 0 && messages[len - 1].sender_id === currentUserId;
+
+    if (convChanged) {
+      // Nouvelle conversation ouverte : on va tout en bas, sans animation.
+      nearBottomRef.current = true;
+      if (len > 0) requestAnimationFrame(() => jumpToBottom('auto'));
+      else setShowNewPill(false);
+    } else if (isInitialLoad) {
+      requestAnimationFrame(() => jumpToBottom('auto'));
+    } else if (len > prevLenRef.current) {
+      if (nearBottomRef.current || lastIsOwn) {
+        jumpToBottom('smooth');
+      } else {
+        setShowNewPill(true);
+      }
+    }
+    convKeyRef.current = conversationId;
+    prevLenRef.current = len;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [messages, currentUserId, conversationId]);
 
   const handleStartAudioCall = () => {
     if (contact?.id && onStartCall) {
@@ -275,7 +333,9 @@ export function ChatArea({
       )}
 
       {/* Messages */}
+      <div className="relative flex-1 min-h-0 flex flex-col">
       <ScrollArea
+        ref={scrollRootRef}
         className="flex-1 p-3 sm:p-6 scrollbar-thin bg-cover bg-center bg-no-repeat"
         style={chatBackground ? { backgroundImage: `url(${chatBackground})` } : {}}
       >
@@ -312,6 +372,18 @@ export function ChatArea({
           <div ref={messagesEndRef} />
         </div>
       </ScrollArea>
+
+      {/* Pastille "nouveaux messages" quand on a scrollé vers le haut */}
+      {showNewPill && (
+        <button
+          onClick={() => jumpToBottom('smooth')}
+          className="absolute bottom-3 left-1/2 -translate-x-1/2 flex items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1.5 shadow-md label-file text-[0.6rem] text-foreground hover:bg-accent transition-colors"
+        >
+          <ArrowDown className="w-3.5 h-3.5" />
+          Nouveaux messages
+        </button>
+      )}
+      </div>
 
       <MessageComposer
         currentUserId={currentUserId}

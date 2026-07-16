@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { isLikelyEncrypted } from '@/lib/crypto';
 import type { Tables } from '@/integrations/supabase/types';
@@ -16,6 +16,8 @@ export interface ConversationWithDetails extends Conversation {
 export function useConversations(userId: string | undefined) {
   const [conversations, setConversations] = useState<ConversationWithDetails[]>([]);
   const [loading, setLoading] = useState(true);
+  // IDs des conversations de l'utilisateur (pour filtrer les events Realtime)
+  const conversationIdsRef = useRef<string[]>([]);
 
   const fetchConversations = useCallback(async () => {
     if (!userId) return;
@@ -32,6 +34,7 @@ export function useConversations(userId: string | undefined) {
     }
 
     const conversationIds = memberships.map(m => m.conversation_id);
+    conversationIdsRef.current = conversationIds;
 
     // Get conversations
     const { data: convos } = await supabase
@@ -110,6 +113,44 @@ export function useConversations(userId: string | undefined) {
   useEffect(() => {
     fetchConversations();
   }, [fetchConversations]);
+
+  // Mise à jour temps réel de la liste (dernier message + compteur non-lus)
+  // sans refetch manuel : on écoute les nouveaux messages de nos conversations
+  // et l'ajout à une nouvelle conversation.
+  useEffect(() => {
+    if (!userId) return;
+
+    let debounce: ReturnType<typeof setTimeout> | null = null;
+    const scheduleRefetch = () => {
+      if (debounce) clearTimeout(debounce);
+      debounce = setTimeout(() => { fetchConversations(); }, 600);
+    };
+
+    const channel = supabase
+      .channel(`conversations-updates:${userId}`)
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'messages' },
+        (payload) => {
+          const convId = (payload.new as Message)?.conversation_id;
+          // On ne rafraîchit que si le message concerne une de nos conversations
+          if (convId && conversationIdsRef.current.includes(convId)) {
+            scheduleRefetch();
+          }
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'conversation_members', filter: `user_id=eq.${userId}` },
+        () => scheduleRefetch(),
+      )
+      .subscribe();
+
+    return () => {
+      if (debounce) clearTimeout(debounce);
+      supabase.removeChannel(channel);
+    };
+  }, [userId, fetchConversations]);
 
   const createConversation = async (friendId: string): Promise<string | null> => {
     if (!userId) return null;
