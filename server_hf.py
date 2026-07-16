@@ -70,6 +70,14 @@ class Config:
     # ne s'applique que si l'identité est fournie.
     STRICT_AUTH = os.getenv("STRICT_AUTH", "false").lower() == "true"
 
+    # Origines autorisées (CORS). Liste blanche séparée par des virgules :
+    #   ALLOWED_ORIGINS="https://mon-front.vercel.app,https://mon-front.netlify.app"
+    # Si vide -> mode permissif SANS credentials (rétro-compatible, l'app
+    # n'utilise pas de cookies). Définir cette variable durcit la config.
+    ALLOWED_ORIGINS = [
+        o.strip() for o in os.getenv("ALLOWED_ORIGINS", "").split(",") if o.strip()
+    ]
+
 # ============================================================================
 # INITIALISATION FASTAPI
 # ============================================================================
@@ -82,25 +90,25 @@ app = FastAPI(
     redoc_url="/redoc" if Config.DEBUG_MODE else None
 )
 
-# CORS optimisé pour frontend multi-environnement
-frontend_origins = [
-    "http://localhost:3000",
-    "http://localhost:5173",
-    "http://localhost:8080",
-    "https://*.hf.space",
-    "https://*.vercel.app",
-    "https://*.netlify.app",
-    "*"  # Fallback permissif pour dev
-]
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=frontend_origins,
-    allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allow_headers=["*"],
-    expose_headers=["*"]
-)
+# CORS : liste blanche si ALLOWED_ORIGINS est défini (recommandé en prod),
+# sinon mode permissif SANS credentials (l'app n'utilise pas de cookies).
+# NB : "*" + allow_credentials=True est invalide côté navigateur — on évite.
+if Config.ALLOWED_ORIGINS:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=Config.ALLOWED_ORIGINS,
+        allow_credentials=True,
+        allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+        allow_headers=["*"],
+    )
+else:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=False,
+        allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+        allow_headers=["*"],
+    )
 
 # ============================================================================
 # DATA MODELS
