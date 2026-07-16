@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
+import { isLikelyEncrypted } from '@/lib/crypto';
 import type { Tables } from '@/integrations/supabase/types';
 
 type Conversation = Tables<'conversations'>;
@@ -74,7 +75,7 @@ export function useConversations(userId: string | undefined) {
         if (encryptedMsg) {
           lastMsg = {
             ...encryptedMsg,
-            content: encryptedMsg.content?.startsWith('gAAAAA') ? '(Message chiffré)' : encryptedMsg.content
+            content: isLikelyEncrypted(encryptedMsg.content) ? '(Message chiffré)' : encryptedMsg.content
           };
         }
 
@@ -172,13 +173,7 @@ export function useConversations(userId: string | undefined) {
   const deleteConversation = async (conversationId: string): Promise<boolean> => {
     if (!userId) return false;
 
-    // Delete messages first
-    await supabase
-      .from('messages')
-      .delete()
-      .eq('conversation_id', conversationId);
-
-    // Delete membership
+    // Retirer d'abord notre propre appartenance (on quitte la conversation)
     const { error: memberError } = await supabase
       .from('conversation_members')
       .delete()
@@ -190,11 +185,25 @@ export function useConversations(userId: string | undefined) {
       return false;
     }
 
-    // Try to delete the conversation (will work if no other members)
-    await supabase
-      .from('conversations')
-      .delete()
-      .eq('id', conversationId);
+    // Reste-t-il d'autres membres ? Si oui, on ne touche PAS aux messages :
+    // on a simplement quitté la conversation, les autres gardent leur historique.
+    const { count: remainingMembers } = await supabase
+      .from('conversation_members')
+      .select('*', { count: 'exact', head: true })
+      .eq('conversation_id', conversationId);
+
+    if ((remainingMembers || 0) === 0) {
+      // On était le dernier membre : suppression définitive (messages + conversation)
+      await supabase
+        .from('messages')
+        .delete()
+        .eq('conversation_id', conversationId);
+
+      await supabase
+        .from('conversations')
+        .delete()
+        .eq('id', conversationId);
+    }
 
     await fetchConversations();
     return true;

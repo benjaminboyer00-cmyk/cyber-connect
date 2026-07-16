@@ -10,6 +10,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { SERVER_CONFIG, getEndpointUrl, checkServerHealth } from '@/config/server';
+import { isLikelyEncrypted } from '@/lib/crypto';
 import type { Tables } from '@/integrations/supabase/types';
 import { toast } from 'sonner';
 
@@ -85,14 +86,24 @@ export function useMessages(conversationId: string | null, userId: string | unde
   /**
    * Déchiffrer un seul message via POST /api/decrypt_message
    */
-  const decryptSingleMessage = useCallback(async (encryptedContent: string): Promise<string> => {
+  const decryptSingleMessage = useCallback(async (
+    encryptedContent: string,
+    conversationId?: string | null,
+    forUserId?: string,
+  ): Promise<string> => {
     try {
       const response = await fetch(
         `${SERVER_CONFIG.BASE_URL}/api/decrypt_message`,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ content: encryptedContent }),
+          // On transmet l'identité pour que le serveur vérifie l'appartenance
+          // à la conversation avant de déchiffrer (pas d'oracle ouvert).
+          body: JSON.stringify({
+            content: encryptedContent,
+            conversation_id: conversationId ?? undefined,
+            user_id: forUserId ?? undefined,
+          }),
           signal: AbortSignal.timeout(5000),
         }
       );
@@ -135,8 +146,11 @@ export function useMessages(conversationId: string | null, userId: string | unde
     try {
       console.log('[fetchMessages] 📥 Récupération via serveur Python...');
       
+      const messagesUrl = uid
+        ? `${SERVER_CONFIG.BASE_URL}/api/get_messages/${convId}?user_id=${encodeURIComponent(uid)}`
+        : `${SERVER_CONFIG.BASE_URL}/api/get_messages/${convId}`;
       const response = await fetch(
-        `${SERVER_CONFIG.BASE_URL}/api/get_messages/${convId}`,
+        messagesUrl,
         {
           method: 'GET',
           headers: { 'Content-Type': 'application/json' },
@@ -157,11 +171,11 @@ export function useMessages(conversationId: string | null, userId: string | unde
       const processedMessages = await Promise.all(
         messagesData.map(async (msg: any) => {
           // Si le backend n'a pas pu déchiffrer
-          if (msg.content && msg._decrypted === false && msg.content.startsWith('gAAAA')) {
+          if (msg.content && msg._decrypted === false && isLikelyEncrypted(msg.content)) {
             try {
               console.log(`[fetchMessages] 🔓 Tentative de déchiffrement frontend pour message ${msg.id}`);
               
-              const decryptedContent = await decryptSingleMessage(msg.content);
+              const decryptedContent = await decryptSingleMessage(msg.content, convId, uid);
               
               // Vérifier que le déchiffrement a réussi (ne commence pas par [Erreur)
               if (decryptedContent && !decryptedContent.startsWith('[Erreur')) {
@@ -260,10 +274,17 @@ export function useMessages(conversationId: string | null, userId: string | unde
     }
   }, [safeSetState]);
 
-  // Fetch messages quand conversationId change
+  // NB : le fetch initial est déclenché par l'effet d'abonnement Realtime
+  // plus bas (qui appelle fetchMessages() puis subscribeToMessages()).
+  // On évite ainsi un double appel réseau au changement de conversation.
+
+  // Quand aucune conversation n'est sélectionnée, on vide la liste (sans réseau).
   useEffect(() => {
-    fetchMessages();
-  }, [conversationId, fetchMessages]);
+    if (!conversationId) {
+      safeSetState(setMessages, []);
+      safeSetState(setLoading, false);
+    }
+  }, [conversationId, safeSetState]);
 
   /**
    * Fonction pour s'abonner aux messages Realtime
@@ -298,9 +319,9 @@ export function useMessages(conversationId: string | null, userId: string | unde
             // DÉCHIFFREMENT IMMÉDIAT via POST /api/decrypt_message
             let decryptedContent = newMessage.content || '';
             
-            if (newMessage.content && newMessage.content.startsWith('gAAAA')) {
+            if (isLikelyEncrypted(newMessage.content)) {
               console.log('[Realtime] 🔓 Déchiffrement du nouveau message...');
-              decryptedContent = await decryptSingleMessage(newMessage.content);
+              decryptedContent = await decryptSingleMessage(newMessage.content, convId, userIdRef.current);
             }
 
             // Récupérer le profil du sender

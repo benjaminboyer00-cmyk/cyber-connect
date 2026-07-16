@@ -52,7 +52,7 @@ export function NewChatModal({ open, onClose, friends, onSelectFriend }: NewChat
                         </Avatar>
                         <span 
                           className={`absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-card ${
-                            friend.profile?.status === 'online' ? 'bg-green-500' : 'bg-gray-500'
+                            friend.profile?.status === 'online' ? 'status-online' : 'status-offline'
                           }`}
                         />
                       </div>

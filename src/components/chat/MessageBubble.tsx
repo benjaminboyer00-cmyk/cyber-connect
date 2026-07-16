@@ -157,7 +157,7 @@ export function MessageBubble({ message, isOwn, currentUserId, formatTime, onRep
             {(onPin || onUnpin) && (
               <button
                 onClick={() => isPinned ? onUnpin?.(message.id) : onPin?.(message.id)}
-                className={`hover:bg-muted rounded p-1 ml-1 text-xs ${isPinned ? 'text-yellow-500' : 'text-muted-foreground'}`}
+                className={`hover:bg-muted rounded p-1 ml-1 text-xs ${isPinned ? 'text-warning' : 'text-muted-foreground'}`}
                 title={isPinned ? 'Désépingler' : 'Épingler'}
               >
                 📌
@@ -187,11 +187,11 @@ export function MessageBubble({ message, isOwn, currentUserId, formatTime, onRep
           
           <div className="flex flex-col">
             <div
-              className={`px-4 py-2 rounded-2xl ${
+              className={`px-3.5 py-2 rounded-lg border ${
                 isOwn
-                  ? 'bg-gradient-to-r from-primary to-accent text-primary-foreground rounded-br-md'
-                  : 'bg-muted text-foreground rounded-bl-md'
-              } ${isPinned ? 'ring-2 ring-yellow-500/50' : ''}`}
+                  ? 'bg-primary text-primary-foreground border-primary/60 rounded-br-sm'
+                  : 'bg-card text-foreground border-border rounded-bl-sm'
+              } ${isPinned ? 'ring-1 ring-warning/60' : ''}`}
             >
               {/* Message de réponse (style WhatsApp) */}
               {replyToMessage && (
@@ -212,7 +212,7 @@ export function MessageBubble({ message, isOwn, currentUserId, formatTime, onRep
                 </div>
               )}
               {isPinned && (
-                <div className="flex items-center gap-1 text-[10px] text-yellow-500 mb-1">
+                <div className="flex items-center gap-1 label-file text-[9px] text-warning mb-1">
                   <span>📌</span>
                   <span>Épinglé</span>
                 </div>
@@ -272,7 +272,7 @@ export function MessageBubble({ message, isOwn, currentUserId, formatTime, onRep
           </div>
         )}
         
-        <p className={`text-xs text-muted-foreground mt-1 ${isOwn ? 'text-right' : ''}`}>
+        <p className={`font-mono-ds text-[0.65rem] text-muted-foreground/70 mt-1 ${isOwn ? 'text-right' : ''}`}>
           {formatTime(message.created_at)}
         </p>
       </div>

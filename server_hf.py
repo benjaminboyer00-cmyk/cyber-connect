@@ -63,6 +63,13 @@ class Config:
     LOG_LEVEL = "INFO"
     DEBUG_MODE = os.getenv("DEBUG", "false").lower() == "true"
 
+    # Sécurité : quand STRICT_AUTH=true, les endpoints sensibles
+    # (get_messages / decrypt_message) EXIGENT une identité (user_id) membre
+    # de la conversation. À activer une fois le frontend redéployé (il envoie
+    # désormais user_id). Par défaut false => rollout sans casse : l'enforcement
+    # ne s'applique que si l'identité est fournie.
+    STRICT_AUTH = os.getenv("STRICT_AUTH", "false").lower() == "true"
+
 # ============================================================================
 # INITIALISATION FASTAPI
 # ============================================================================
@@ -122,6 +129,10 @@ class MessagePayload(BaseModel):
 
 class DecryptPayload(BaseModel):
     content: str = Field(..., min_length=1)
+    # Contexte d'accès : permet de vérifier que l'appelant est membre de la
+    # conversation avant de déchiffrer (évite l'oracle de déchiffrement ouvert).
+    conversation_id: Optional[str] = Field(None, max_length=100)
+    user_id: Optional[str] = Field(None, max_length=100)
 
 class ReportPayload(BaseModel):
     message_id: str = Field(..., min_length=1)
@@ -289,6 +300,31 @@ class DatabaseService:
             Logger.error("DatabaseService: Échec d'insertion", e)
             return None, False
     
+    def is_member(self, user_id: str, conversation_id: str) -> bool:
+        """
+        Vérifie que `user_id` est bien membre de `conversation_id`.
+
+        Politique de sécurité :
+        - fail-CLOSED sur une non-appartenance confirmée (retourne False) ;
+        - fail-OPEN sur erreur infra / mode démo (retourne True), pour ne
+          jamais verrouiller toute l'app à cause d'un incident DB.
+        """
+        if not self.connected:
+            return True  # mode démo : pas de DB, on ne bloque pas
+        if not user_id or not conversation_id:
+            return False
+        try:
+            response = self.client.table("conversation_members") \
+                .select("user_id") \
+                .eq("conversation_id", conversation_id) \
+                .eq("user_id", user_id) \
+                .limit(1) \
+                .execute()
+            return bool(response.data)
+        except Exception as e:
+            Logger.error("DatabaseService: échec vérif appartenance (fail-open)", e)
+            return True
+
     def get_messages(self, conversation_id: str, limit: int = 50) -> Tuple[List[dict], bool]:
         if not self.connected:
             return [], True
@@ -582,11 +618,21 @@ async def send_message(payload: MessagePayload):
         raise HTTPException(status_code=500, detail=f"Erreur interne: {str(e)[:100]}")
 
 @app.get("/api/get_messages/{conversation_id}")
-async def get_messages(conversation_id: str, limit: int = 50, decrypt: bool = True):
+async def get_messages(conversation_id: str, limit: int = 50, decrypt: bool = True, user_id: Optional[str] = None):
     try:
         if not conversation_id or conversation_id.lower() in ["undefined", "null"]:
             return {"messages": [], "error": "conversation_id invalide"}
-        
+
+        # Contrôle d'accès : l'appelant doit être membre de la conversation.
+        # Rollout sans casse : on n'exige l'identité que si STRICT_AUTH est actif ;
+        # sinon on ne vérifie que lorsqu'un user_id est fourni.
+        has_identity = bool(user_id) and user_id.lower() not in ["undefined", "null", "none", ""]
+        if Config.STRICT_AUTH and not has_identity:
+            return JSONResponse(status_code=401, content={"error": "Authentification requise (user_id manquant)"})
+        if has_identity and not db.is_member(user_id, conversation_id):
+            Logger.warning(f"Accès refusé: {str(user_id)[:8]} n'est pas membre de {conversation_id[:8]}")
+            return JSONResponse(status_code=403, content={"error": "Accès refusé à cette conversation"})
+
         messages, success = db.get_messages(conversation_id, limit)
         
         if not success:
@@ -647,10 +693,21 @@ async def get_messages(conversation_id: str, limit: int = 50, decrypt: bool = Tr
 async def decrypt_single_message(payload: DecryptPayload):
     if not encryption.initialized:
         return {"decrypted": "[CHIFFREMENT DÉSACTIVÉ]", "success": False}
-    
+
     if not payload.content:
         return {"decrypted": "", "success": False}
-    
+
+    # Contrôle d'accès : n'agir comme service de déchiffrement que pour un
+    # membre de la conversation concernée (sinon = oracle de déchiffrement).
+    has_identity = (
+        bool(payload.user_id) and bool(payload.conversation_id)
+        and payload.user_id.lower() not in ["undefined", "null", "none", ""]
+    )
+    if Config.STRICT_AUTH and not has_identity:
+        return JSONResponse(status_code=401, content={"error": "Authentification requise"})
+    if has_identity and not db.is_member(payload.user_id, payload.conversation_id):
+        return JSONResponse(status_code=403, content={"error": "Accès refusé"})
+
     decrypted, success = encryption.decrypt(payload.content)
     
     return {

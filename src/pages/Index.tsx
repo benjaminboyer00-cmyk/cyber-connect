@@ -69,8 +69,7 @@ export default function Index() {
   const [discordBotsModalOpen, setDiscordBotsModalOpen] = useState(false);
   const [themeModalOpen, setThemeModalOpen] = useState(false);
   const [profileModalOpen, setProfileModalOpen] = useState(false);
-  const [sidebarOpen, setSidebarOpen] = useState(false);
-  
+
   // Réactions
   const { addReaction, getReactionCounts, hasUserReacted } = useReactions(user?.id);
   
@@ -204,29 +203,33 @@ export default function Index() {
 
   return (
     <div className="dark min-h-screen h-screen bg-background flex overflow-hidden">
-      <Sidebar
-        profile={profile}
-        conversations={conversations}
-        pendingRequests={pendingRequests}
-        selectedConversation={selectedConversation}
-        onSelectConversation={setSelectedConversation}
-        onDeleteConversation={handleDeleteConversation}
-        onSignOut={handleSignOut}
-        onSearchUsers={() => setSearchModalOpen(true)}
-        onNewChat={() => setNewChatModalOpen(true)}
-        onViewRequests={() => setRequestsModalOpen(true)}
-        onCreateGroup={() => setCreateGroupModalOpen(true)}
-        onUpdateAvatar={async (avatarUrl) => {
-          await updateProfile({ avatar_url: avatarUrl });
-        }}
-        onOpenDiscordBots={() => setDiscordBotsModalOpen(true)}
-        onOpenTheme={() => setThemeModalOpen(true)}
-        onOpenProfile={() => setProfileModalOpen(true)}
-        isMobileOpen={sidebarOpen}
-        onCloseMobile={() => setSidebarOpen(false)}
-      />
-      
+      {/* Liste des dossiers — plein écran sur mobile, colonne fixe sur desktop */}
+      <div className={`${selectedConversation ? 'hidden md:flex' : 'flex'} w-full md:w-80 shrink-0`}>
+        <Sidebar
+          profile={profile}
+          conversations={conversations}
+          pendingRequests={pendingRequests}
+          selectedConversation={selectedConversation}
+          onSelectConversation={setSelectedConversation}
+          onDeleteConversation={handleDeleteConversation}
+          onSignOut={handleSignOut}
+          onSearchUsers={() => setSearchModalOpen(true)}
+          onNewChat={() => setNewChatModalOpen(true)}
+          onViewRequests={() => setRequestsModalOpen(true)}
+          onCreateGroup={() => setCreateGroupModalOpen(true)}
+          onUpdateAvatar={async (avatarUrl) => {
+            await updateProfile({ avatar_url: avatarUrl });
+          }}
+          onOpenDiscordBots={() => setDiscordBotsModalOpen(true)}
+          onOpenTheme={() => setThemeModalOpen(true)}
+          onOpenProfile={() => setProfileModalOpen(true)}
+        />
+      </div>
+
+      {/* Zone de conversation — plein écran sur mobile quand un dossier est ouvert */}
+      <div className={`${selectedConversation ? 'flex' : 'hidden md:flex'} flex-1 min-w-0`}>
       <ChatArea
+        onBack={() => setSelectedConversation(null)}
         contact={contact}
         messages={messages}
         currentUserId={user.id}
@@ -256,6 +259,7 @@ export default function Index() {
         onSetChatBackground={(url) => setConversationBackground(url)}
         onClearChatBackground={clearBackground}
       />
+      </div>
 
       {/* Modal appel entrant */}
       <IncomingCallModal
@@ -312,7 +316,7 @@ export default function Index() {
       <AlertDialog open={discordBotsModalOpen} onOpenChange={setDiscordBotsModalOpen}>
         <AlertDialogContent className="max-w-md">
           <AlertDialogHeader>
-            <AlertDialogTitle>🤖 Bots Discord</AlertDialogTitle>
+            <AlertDialogTitle>Bots Discord</AlertDialogTitle>
             <AlertDialogDescription>
               Gérez vos webhooks Discord pour recevoir les messages.
             </AlertDialogDescription>
@@ -328,7 +332,7 @@ export default function Index() {
       <AlertDialog open={themeModalOpen} onOpenChange={setThemeModalOpen}>
         <AlertDialogContent className="max-w-md">
           <AlertDialogHeader>
-            <AlertDialogTitle>🎨 Personnalisation</AlertDialogTitle>
+            <AlertDialogTitle>Personnalisation</AlertDialogTitle>
             <AlertDialogDescription>
               Personnalisez l'apparence de l'application.
             </AlertDialogDescription>
@@ -344,7 +348,7 @@ export default function Index() {
       <AlertDialog open={profileModalOpen} onOpenChange={setProfileModalOpen}>
         <AlertDialogContent className="max-w-md">
           <AlertDialogHeader>
-            <AlertDialogTitle>👤 Mon Profil</AlertDialogTitle>
+            <AlertDialogTitle>Mon Profil</AlertDialogTitle>
             <AlertDialogDescription>
               Modifiez vos informations personnelles.
             </AlertDialogDescription>

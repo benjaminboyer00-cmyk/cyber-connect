@@ -6,7 +6,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { toast } from 'sonner';
-import { MessageSquare, Zap } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
 
 export default function Auth() {
   const [isLogin, setIsLogin] = useState(true);
@@ -57,93 +57,105 @@ export default function Auth() {
 
   return (
     <div className="dark min-h-screen bg-background flex items-center justify-center p-4">
-      <div className="absolute inset-0 overflow-hidden pointer-events-none">
-        <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-primary/10 rounded-full blur-3xl" />
-        <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-accent/10 rounded-full blur-3xl" />
-      </div>
-      
-      <Card className="w-full max-w-md border-border/50 bg-card/80 backdrop-blur-xl">
-        <CardHeader className="text-center space-y-4">
-          <div className="mx-auto w-16 h-16 rounded-2xl bg-gradient-to-br from-primary to-accent flex items-center justify-center glow-primary">
-            <MessageSquare className="w-8 h-8 text-primary-foreground" />
-          </div>
-          <CardTitle className="text-2xl font-bold bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">
-            CyberChat
-          </CardTitle>
-          <CardDescription className="text-muted-foreground">
-            {isLogin ? 'Connectez-vous à votre compte' : 'Créez votre compte'}
-          </CardDescription>
-        </CardHeader>
-        
-        <CardContent>
-          <form onSubmit={handleSubmit} className="space-y-4">
-            {!isLogin && (
-              <div className="space-y-2">
-                <Label htmlFor="username">Nom d'utilisateur</Label>
+      <div className="w-full max-w-md">
+        {/* En-tête façon dossier */}
+        <div className="mb-6 flex items-center justify-between border-b border-border pb-3">
+          <span className="label-file text-[0.68rem] text-muted-foreground">Messagerie chiffrée</span>
+          <span className="label-file text-[0.68rem] text-muted-foreground">Réf. CC-{isLogin ? 'AUTH' : 'REG'}</span>
+        </div>
+
+        <Card className="border-border bg-card shadow-none">
+          <CardHeader className="space-y-3 border-b border-border">
+            <div className="flex items-center gap-3">
+              {/* Scellé */}
+              <div className="grid h-11 w-11 shrink-0 place-items-center rounded-sm border-2 border-primary text-primary">
+                <span className="font-mono-ds text-[0.72rem] font-semibold tracking-widest">CC</span>
+              </div>
+              <div>
+                <CardTitle className="font-serif text-2xl font-bold text-foreground">
+                  CyberConnect
+                </CardTitle>
+                <CardDescription className="label-file text-[0.66rem] text-muted-foreground">
+                  {isLogin ? 'Ouverture de session' : 'Nouveau dossier'}
+                </CardDescription>
+              </div>
+            </div>
+          </CardHeader>
+
+          <CardContent className="pt-6">
+            <form onSubmit={handleSubmit} className="space-y-4">
+              {!isLogin && (
+                <div className="space-y-1.5">
+                  <Label htmlFor="username" className="label-file text-[0.66rem] text-muted-foreground">Nom d'utilisateur</Label>
+                  <Input
+                    id="username"
+                    type="text"
+                    placeholder="votre_pseudo"
+                    value={username}
+                    onChange={(e) => setUsername(e.target.value)}
+                    className="bg-background"
+                  />
+                </div>
+              )}
+
+              <div className="space-y-1.5">
+                <Label htmlFor="email" className="label-file text-[0.66rem] text-muted-foreground">Email</Label>
                 <Input
-                  id="username"
-                  type="text"
-                  placeholder="votre_pseudo"
-                  value={username}
-                  onChange={(e) => setUsername(e.target.value)}
-                  className="bg-muted/50 border-border focus:border-primary"
+                  id="email"
+                  type="email"
+                  placeholder="vous@exemple.com"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  required
+                  className="bg-background"
                 />
               </div>
-            )}
-            
-            <div className="space-y-2">
-              <Label htmlFor="email">Email</Label>
-              <Input
-                id="email"
-                type="email"
-                placeholder="vous@exemple.com"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                required
-                className="bg-muted/50 border-border focus:border-primary"
-              />
-            </div>
-            
-            <div className="space-y-2">
-              <Label htmlFor="password">Mot de passe</Label>
-              <Input
-                id="password"
-                type="password"
-                placeholder="••••••••"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-                minLength={6}
-                className="bg-muted/50 border-border focus:border-primary"
-              />
-            </div>
 
-            <Button 
-              type="submit" 
-              className="w-full bg-gradient-to-r from-primary to-accent hover:opacity-90 text-primary-foreground font-semibold"
-              disabled={loading}
-            >
-              {loading ? (
-                <Zap className="w-4 h-4 animate-pulse" />
-              ) : isLogin ? (
-                'Se connecter'
-              ) : (
-                "S'inscrire"
-              )}
-            </Button>
-          </form>
+              <div className="space-y-1.5">
+                <Label htmlFor="password" className="label-file text-[0.66rem] text-muted-foreground">Mot de passe</Label>
+                <Input
+                  id="password"
+                  type="password"
+                  placeholder="••••••••"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  required
+                  minLength={6}
+                  className="bg-background"
+                />
+              </div>
 
-          <div className="mt-6 text-center">
-            <button
-              type="button"
-              onClick={() => setIsLogin(!isLogin)}
-              className="text-sm text-muted-foreground hover:text-primary transition-colors"
-            >
-              {isLogin ? "Pas encore de compte ? S'inscrire" : 'Déjà un compte ? Se connecter'}
-            </button>
-          </div>
-        </CardContent>
-      </Card>
+              <Button
+                type="submit"
+                className="w-full font-mono-ds text-xs uppercase tracking-wider font-semibold"
+                disabled={loading}
+              >
+                {loading ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : isLogin ? (
+                  'Se connecter'
+                ) : (
+                  "Créer le dossier"
+                )}
+              </Button>
+            </form>
+
+            <div className="mt-6 border-t border-border pt-4 text-center">
+              <button
+                type="button"
+                onClick={() => setIsLogin(!isLogin)}
+                className="text-sm text-muted-foreground transition-colors hover:text-foreground"
+              >
+                {isLogin ? "Pas encore de compte ? S'inscrire" : 'Déjà un compte ? Se connecter'}
+              </button>
+            </div>
+          </CardContent>
+        </Card>
+
+        <p className="mt-4 text-center label-file text-[0.6rem] text-muted-foreground/60">
+          Chiffrement de bout en bout · Fernet
+        </p>
+      </div>
     </div>
   );
 }
